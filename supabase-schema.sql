@@ -140,9 +140,14 @@ as $$
   );
 $$;
 
--- roleとmember_idは権限に直結するため、管理者以外が書き換えられないようDBレベルで防ぐ。
+-- roleとmember_idは権限に直結するため、アプリ経由（PostgREST + 一般ユーザーのJWT）で
+-- 管理者以外が書き換えられないようDBレベルで防ぐ。
 -- (RLSのwith checkだけだと「自分の行を更新できる」ことしか保証できず、
 --  一般メンバーが自分自身のroleをadminに書き換えられてしまう抜け穴があった)
+-- auth.uid()がnullになるSQL Editor / service_role経由の操作（管理者がSupabase側で
+-- 直接実行する場合）はチェック対象外にする。そこは元々DBに直接触れる権限を持つ人しか
+-- 実行できないため、アプリ側のなりすまし対策としては意味がなく、逆に管理作業を
+-- ブロックしてしまうだけになるため。
 create or replace function public.profiles_guard_privileged_fields()
 returns trigger
 language plpgsql
@@ -150,7 +155,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if not public.is_admin() then
+  if auth.uid() is not null and not public.is_admin() then
     if new.role is distinct from old.role then
       raise exception 'role の変更は管理者のみ行えます。';
     end if;
