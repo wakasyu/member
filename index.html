@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>若衆メンバー専用サイト</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <div id="loginScreen" class="login-screen">
+    <section class="login-card">
+      <div class="brand-mark">若衆</div>
+      <h1>メンバー専用サイト</h1>
+      <p>予定確認、日程調整回答、メンバー管理をここで行います。</p>
+      <div id="configWarning" class="notice hidden"></div>
+      <form id="loginForm" class="form-stack">
+        <label>
+          メールアドレス
+          <input id="loginEmail" type="email" autocomplete="username" required>
+        </label>
+        <label>
+          パスワード
+          <input id="loginPassword" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="primary" type="submit">ログイン</button>
+      </form>
+      <div id="loginMessage" class="message"></div>
+    </section>
+  </div>
+
+  <div id="appShell" class="shell hidden">
+    <header class="site-header">
+      <div>
+        <p class="eyebrow">WAKASHU MEMBERS</p>
+        <h1>若衆メンバー専用サイト</h1>
+        <p id="userMeta" class="muted">読み込み中...</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" onclick="refreshAll()">更新</button>
+        <button type="button" onclick="signOut()">ログアウト</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" type="button" data-tab="public" onclick="switchView('public')">予定一覧</button>
+      <button class="tab" type="button" data-tab="answer" onclick="switchView('answer')">日程調整回答</button>
+      <button id="adminTabButton" class="tab hidden" type="button" data-tab="admin" onclick="switchView('admin')">管理</button>
+    </nav>
+
+    <section id="publicView" class="view active">
+      <section class="toolbar">
+        <select id="viewMode" onchange="renderPublic()">
+          <option value="event">予定主体で見る</option>
+          <option value="member">人主体で見る</option>
+        </select>
+        <select id="yearFilter" onchange="renderPublic()"><option value="">すべての年</option></select>
+        <select id="monthFilter" onchange="renderPublic()"><option value="">すべての月</option></select>
+        <select id="categoryFilter" onchange="renderPublic()"><option value="">すべての分類</option></select>
+        <span id="memberFilterWrap">
+          <select id="memberFilter" onchange="renderPublic()"><option value="">全メンバー</option></select>
+        </span>
+        <span id="statusFilterWrap">
+          <select id="statusFilter" onchange="renderPublic()">
+            <option value="">すべての回答状況</option>
+            <option value="参加">参加</option>
+            <option value="不参加">不参加</option>
+            <option value="未定">未定</option>
+            <option value="未回答">未回答</option>
+          </select>
+        </span>
+        <label class="inline-check"><input id="showPast" type="checkbox" onchange="renderPublic()"> 終了した予定を表示する</label>
+      </section>
+      <div id="publicStatus" class="status">読み込み中...</div>
+      <main id="eventList"></main>
+    </section>
+
+    <section id="answerView" class="view">
+      <section class="panel">
+        <h2>日程調整回答</h2>
+        <div id="answerStatus" class="status">予定一覧の日程調整リンク、または共有URLから回答できます。</div>
+        <div id="answerEventBox" class="answer-event hidden"></div>
+        <div class="grid">
+          <label>
+            名前
+            <select id="answerMember"></select>
+          </label>
+          <label>
+            回答区分
+            <select id="answerStatusSelect" onchange="updatePendingVisibility()">
+              <option value="">選択してください</option>
+              <option value="参加">参加</option>
+              <option value="不参加">不参加</option>
+              <option value="未定">未定</option>
+            </select>
+          </label>
+          <label id="pendingField" class="hidden">
+            いつまでに分かるか
+            <input id="pendingUntil" type="date">
+          </label>
+          <label>
+            理由カテゴリ
+            <select id="answerReasonCategory">
+              <option value="">選択なし</option>
+              <option value="体調不良">体調不良</option>
+              <option value="仕事">仕事</option>
+              <option value="学校">学校</option>
+              <option value="私用">私用</option>
+              <option value="時間変更">時間変更</option>
+              <option value="その他">その他</option>
+            </select>
+          </label>
+        </div>
+        <label class="wide-field">
+          理由詳細
+          <input id="answerReason" type="text" placeholder="任意">
+        </label>
+        <label class="wide-field">
+          コメント
+          <textarea id="answerComment" placeholder="遅れて参加、途中退出など"></textarea>
+        </label>
+        <button id="submitAnswerButton" class="primary" type="button" onclick="submitAnswer()">回答を送信</button>
+        <div id="answerMessage" class="message"></div>
+      </section>
+    </section>
+
+    <section id="adminView" class="view">
+      <nav class="subtabs">
+        <button class="subtab active" type="button" data-admin-tab="eventForm" onclick="switchAdminTab('eventForm')">予定追加</button>
+        <button class="subtab" type="button" data-admin-tab="eventList" onclick="switchAdminTab('eventList')">予定一覧</button>
+        <button class="subtab" type="button" data-admin-tab="memberForm" onclick="switchAdminTab('memberForm')">メンバー追加</button>
+        <button class="subtab" type="button" data-admin-tab="memberList" onclick="switchAdminTab('memberList')">メンバー一覧</button>
+        <button class="subtab" type="button" data-admin-tab="logs" onclick="switchAdminTab('logs')">ログ</button>
+      </nav>
+
+      <section class="panel admin-section active" data-admin-section="eventForm">
+        <h2>予定追加・編集</h2>
+        <p class="muted">予定を保存すると、その予定専用の日程調整リンクが自動発行されます。</p>
+        <input id="eventId" type="hidden">
+        <input id="eventToken" type="hidden">
+        <div class="grid3">
+          <label>予定名<input id="eventName" type="text"></label>
+          <label>分類<select id="eventCategory"></select></label>
+          <label>日付<input id="eventDate" type="date"></label>
+          <label>開始時間<input id="startTime" type="time"></label>
+          <label>終了時間<input id="endTime" type="time"></label>
+          <label>場所<input id="place" type="text"></label>
+          <label>場所URL<input id="placeUrl" type="url" placeholder="https://..."></label>
+          <label>作成者<input id="creator" type="text"></label>
+          <label>回答期限<input id="answerDeadline" type="date"></label>
+        </div>
+        <label class="wide-field">備考<textarea id="eventNote"></textarea></label>
+        <div class="button-row">
+          <button class="primary" type="button" onclick="saveEventForm()">予定を保存</button>
+          <button type="button" onclick="clearEventForm()">入力をクリア</button>
+        </div>
+        <div id="eventMessage" class="message"></div>
+      </section>
+
+      <section class="panel admin-section" data-admin-section="memberForm">
+        <h2>メンバー追加・編集</h2>
+        <input id="memberId" type="hidden">
+        <div class="grid4">
+          <label>名前<input id="memberName" type="text"></label>
+          <label>学年<input id="grade" type="text"></label>
+          <label>年齢<input id="age" type="number" min="0"></label>
+          <label>連絡先<input id="contact" type="text"></label>
+          <label>入会日<input id="joinDate" type="date"></label>
+          <label>退会日<input id="leaveDate" type="date"></label>
+          <label>在籍状態<select id="memberState"><option value="在籍">在籍</option><option value="休会">休会</option><option value="退会">退会</option></select></label>
+          <label>表示対象<select id="visible"><option value="true">表示する</option><option value="false">表示しない</option></select></label>
+          <label>衣装サイズ<input id="costumeSize" type="text"></label>
+          <label>袋サイズ<input id="bagSize" type="text"></label>
+        </div>
+        <label class="wide-field">備考<textarea id="memberNote"></textarea></label>
+        <div class="button-row">
+          <button class="primary" type="button" onclick="saveMemberForm()">メンバーを保存</button>
+          <button type="button" onclick="clearMemberForm()">入力をクリア</button>
+        </div>
+        <div id="memberMessage" class="message"></div>
+      </section>
+
+      <section class="panel admin-section" data-admin-section="eventList">
+        <h2>予定一覧・日程調整リンク</h2>
+        <div id="adminEvents"></div>
+      </section>
+
+      <section class="panel admin-section" data-admin-section="memberList">
+        <h2>メンバー一覧</h2>
+        <div id="adminMembers"></div>
+      </section>
+
+      <section class="panel admin-section" data-admin-section="logs">
+        <h2>操作ログ</h2>
+        <div id="adminLogs"></div>
+      </section>
+    </section>
+  </div>
+</body>
+</html>
