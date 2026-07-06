@@ -26,6 +26,9 @@ create table if not exists public.members (
   updated_at timestamptz not null default now()
 );
 
+-- 同姓同名の登録を防ぐ（人主体表示は名前ではなくIDで名寄せするが、念のためDBでも重複を防止する）
+create unique index if not exists members_name_unique_idx on public.members (lower(name));
+
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -59,6 +62,35 @@ create table if not exists public.answers (
   unique (event_id, member_id)
 );
 
+-- 理由を「カテゴリ：詳細」の1文字列に押し込めると、自由入力欄にたまたま
+-- カテゴリ名を書かれた場合に再表示時の解析を誤るため、カラムを分ける。
+-- 旧`reason`列は過去データ保持のため残すが、アプリからは読み書きしない。
+alter table public.answers add column if not exists reason_category text not null default '';
+alter table public.answers add column if not exists reason_detail text not null default '';
+
+update public.answers
+set
+  reason_category = case
+    when reason = '体調不良' or reason like '体調不良：%' then '体調不良'
+    when reason = '仕事' or reason like '仕事：%' then '仕事'
+    when reason = '学校' or reason like '学校：%' then '学校'
+    when reason = '私用' or reason like '私用：%' then '私用'
+    when reason = '時間変更' or reason like '時間変更：%' then '時間変更'
+    when reason = 'その他' or reason like 'その他：%' then 'その他'
+    else ''
+  end,
+  reason_detail = case
+    when reason like '体調不良：%' then substring(reason from length('体調不良：') + 1)
+    when reason like '仕事：%' then substring(reason from length('仕事：') + 1)
+    when reason like '学校：%' then substring(reason from length('学校：') + 1)
+    when reason like '私用：%' then substring(reason from length('私用：') + 1)
+    when reason like '時間変更：%' then substring(reason from length('時間変更：') + 1)
+    when reason like 'その他：%' then substring(reason from length('その他：') + 1)
+    when reason in ('体調不良', '仕事', '学校', '私用', '時間変更', 'その他') then ''
+    else reason
+  end
+where reason_category = '' and reason_detail = '' and coalesce(reason, '') <> '';
+
 create table if not exists public.logs (
   id bigint generated always as identity primary key,
   action text not null,
@@ -72,11 +104,26 @@ create table if not exists public.logs (
   created_at timestamptz not null default now()
 );
 
+-- 「誰が」操作したかを残す（対象者だけでなく実行者も記録する）
+alter table public.logs add column if not exists actor_id uuid references auth.users(id) on delete set null;
+alter table public.logs add column if not exists actor_name text not null default '';
+
+-- 予定の分類・回答理由の選択肢を管理者がアプリから追加/削除できるようにする
+create table if not exists public.list_options (
+  id uuid primary key default gen_random_uuid(),
+  option_type text not null check (option_type in ('event_category', 'reason_category')),
+  label text not null,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  unique (option_type, label)
+);
+
 alter table public.profiles enable row level security;
 alter table public.members enable row level security;
 alter table public.events enable row level security;
 alter table public.answers enable row level security;
 alter table public.logs enable row level security;
+alter table public.list_options enable row level security;
 
 create or replace function public.is_admin()
 returns boolean
@@ -91,6 +138,47 @@ as $$
     where id = auth.uid()
       and role = 'admin'
   );
+$$;
+
+-- roleとmember_idは権限に直結するため、管理者以外が書き換えられないようDBレベルで防ぐ。
+-- (RLSのwith checkだけだと「自分の行を更新できる」ことしか保証できず、
+--  一般メンバーが自分自身のroleをadminに書き換えられてしまう抜け穴があった)
+create or replace function public.profiles_guard_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    if new.role is distinct from old.role then
+      raise exception 'role の変更は管理者のみ行えます。';
+    end if;
+    if new.member_id is distinct from old.member_id then
+      raise exception 'member_id の変更は管理者のみ行えます。';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_guard_privileged_fields on public.profiles;
+create trigger profiles_guard_privileged_fields
+before update on public.profiles
+for each row execute function public.profiles_guard_privileged_fields();
+
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.table_constraints
+    where constraint_name = 'profiles_member_id_fkey'
+      and table_name = 'profiles'
+  ) then
+    alter table public.profiles
+      add constraint profiles_member_id_fkey
+      foreign key (member_id) references public.members(id) on delete set null;
+  end if;
+end;
 $$;
 
 drop policy if exists "profiles read own or admin" on public.profiles;
@@ -144,24 +232,41 @@ on public.answers for select
 to authenticated
 using (true);
 
+-- 出欠回答は「本人の分」か管理者だけが書き込み/削除できるようにする
+-- (以前は認証済みなら誰でも他人の回答を書き換えられた)
 drop policy if exists "answers write authenticated" on public.answers;
-create policy "answers write authenticated"
+drop policy if exists "answers insert self or admin" on public.answers;
+create policy "answers insert self or admin"
 on public.answers for insert
 to authenticated
-with check (true);
+with check (
+  public.is_admin()
+  or member_id = (select member_id from public.profiles where id = auth.uid())
+);
 
 drop policy if exists "answers update authenticated" on public.answers;
-create policy "answers update authenticated"
+drop policy if exists "answers update self or admin" on public.answers;
+create policy "answers update self or admin"
 on public.answers for update
 to authenticated
-using (true)
-with check (true);
+using (
+  public.is_admin()
+  or member_id = (select member_id from public.profiles where id = auth.uid())
+)
+with check (
+  public.is_admin()
+  or member_id = (select member_id from public.profiles where id = auth.uid())
+);
 
 drop policy if exists "answers delete admin" on public.answers;
-create policy "answers delete admin"
+drop policy if exists "answers delete self or admin" on public.answers;
+create policy "answers delete self or admin"
 on public.answers for delete
 to authenticated
-using (public.is_admin());
+using (
+  public.is_admin()
+  or member_id = (select member_id from public.profiles where id = auth.uid())
+);
 
 drop policy if exists "logs read authenticated" on public.logs;
 create policy "logs read authenticated"
@@ -169,11 +274,56 @@ on public.logs for select
 to authenticated
 using (true);
 
+-- ログの記録者(actor_id)を偽装できないようにする
 drop policy if exists "logs insert authenticated" on public.logs;
-create policy "logs insert authenticated"
+drop policy if exists "logs insert self" on public.logs;
+create policy "logs insert self"
 on public.logs for insert
 to authenticated
-with check (true);
+with check (actor_id = auth.uid());
+
+drop policy if exists "list_options read authenticated" on public.list_options;
+create policy "list_options read authenticated"
+on public.list_options for select
+to authenticated
+using (true);
+
+drop policy if exists "list_options write admin" on public.list_options;
+create policy "list_options write admin"
+on public.list_options for all
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
+
+-- リアルタイム反映（他の人の操作を自動的に画面へ反映する）のためのpublication登録
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'events'
+  ) then
+    alter publication supabase_realtime add table public.events;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'members'
+  ) then
+    alter publication supabase_realtime add table public.members;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'answers'
+  ) then
+    alter publication supabase_realtime add table public.answers;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'list_options'
+  ) then
+    alter publication supabase_realtime add table public.list_options;
+  end if;
+end;
+$$;
 
 insert into public.members (name, member_state, visible)
 select seed.name, seed.member_state, seed.visible
@@ -190,6 +340,31 @@ where not exists (
   select 1
   from public.members
   where public.members.name = seed.name
+);
+
+insert into public.list_options (option_type, label, sort_order)
+select seed.option_type, seed.label, seed.sort_order
+from (
+  values
+    ('event_category', '練習', 1),
+    ('event_category', '演奏', 2),
+    ('event_category', 'イベント', 3),
+    ('event_category', 'ミーティング', 4),
+    ('event_category', '準備', 5),
+    ('event_category', '本番', 6),
+    ('event_category', 'その他', 7),
+    ('reason_category', '体調不良', 1),
+    ('reason_category', '仕事', 2),
+    ('reason_category', '学校', 3),
+    ('reason_category', '私用', 4),
+    ('reason_category', '時間変更', 5),
+    ('reason_category', 'その他', 6)
+) as seed(option_type, label, sort_order)
+where not exists (
+  select 1
+  from public.list_options
+  where public.list_options.option_type = seed.option_type
+    and public.list_options.label = seed.label
 );
 
 -- 初回だけ実行：

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>若衆メンバー専用サイト</title>
   <link rel="stylesheet" href="./styles.css">
+  <link rel="icon" href="./logo.png">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
   <script defer src="./app.js"></script>
@@ -12,7 +13,7 @@
 <body>
   <div id="loginScreen" class="login-screen">
     <section class="login-card">
-      <div class="brand-mark">若衆</div>
+      <div class="brand-mark"><img src="./logo.png" alt="若衆の絆" onerror="this.remove()"><span>若衆</span></div>
       <h1>メンバー専用サイト</h1>
       <p>予定確認、日程調整回答、メンバー管理をここで行います。</p>
       <div id="configWarning" class="notice hidden"></div>
@@ -27,7 +28,30 @@
         </label>
         <button class="primary" type="submit">ログイン</button>
       </form>
+      <div class="form-footer-links">
+        <button id="forgotPasswordButton" class="link-button" type="button">パスワードをお忘れですか？</button>
+      </div>
       <div id="loginMessage" class="message"></div>
+    </section>
+  </div>
+
+  <div id="passwordResetScreen" class="login-screen hidden">
+    <section class="login-card">
+      <div class="brand-mark"><img src="./logo.png" alt="若衆の絆" onerror="this.remove()"><span>若衆</span></div>
+      <h1>新しいパスワードを設定</h1>
+      <p>メールのリンクから開いています。新しいパスワードを入力してください。</p>
+      <form id="passwordResetForm" class="form-stack">
+        <label>
+          新しいパスワード
+          <input id="newPassword" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <label>
+          新しいパスワード（確認）
+          <input id="newPasswordConfirm" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <button id="submitNewPasswordButton" class="primary" type="submit">パスワードを更新</button>
+      </form>
+      <div id="passwordResetMessage" class="message"></div>
     </section>
   </div>
 
@@ -72,6 +96,9 @@
           </select>
         </span>
         <label class="inline-check"><input id="showPast" type="checkbox" onchange="renderPublic()"> 終了した予定を表示する</label>
+        <span id="showInactiveMembersWrap">
+          <label class="inline-check"><input id="showInactiveMembers" type="checkbox" onchange="renderPublic()"> 休会・退会・非表示メンバーも表示する</label>
+        </span>
       </section>
       <div id="publicStatus" class="status">読み込み中...</div>
       <main id="eventList"></main>
@@ -102,15 +129,7 @@
           </label>
           <label>
             理由カテゴリ
-            <select id="answerReasonCategory">
-              <option value="">選択なし</option>
-              <option value="体調不良">体調不良</option>
-              <option value="仕事">仕事</option>
-              <option value="学校">学校</option>
-              <option value="私用">私用</option>
-              <option value="時間変更">時間変更</option>
-              <option value="その他">その他</option>
-            </select>
+            <select id="answerReasonCategory"><option value="">選択なし</option></select>
           </label>
         </div>
         <label class="wide-field">
@@ -121,7 +140,10 @@
           コメント
           <textarea id="answerComment" placeholder="遅れて参加、途中退出など"></textarea>
         </label>
-        <button id="submitAnswerButton" class="primary" type="button" onclick="submitAnswer()">回答を送信</button>
+        <div class="button-row">
+          <button id="submitAnswerButton" class="primary" type="button" onclick="submitAnswer()">回答を送信</button>
+          <button id="clearAnswerButton" class="danger hidden" type="button" onclick="clearAnswer()">回答を取り消す（未回答に戻す）</button>
+        </div>
         <div id="answerMessage" class="message"></div>
       </section>
     </section>
@@ -133,6 +155,7 @@
         <button class="subtab" type="button" data-admin-tab="memberForm" onclick="switchAdminTab('memberForm')">メンバー追加</button>
         <button class="subtab" type="button" data-admin-tab="memberList" onclick="switchAdminTab('memberList')">メンバー一覧</button>
         <button class="subtab" type="button" data-admin-tab="logs" onclick="switchAdminTab('logs')">ログ</button>
+        <button class="subtab" type="button" data-admin-tab="options" onclick="switchAdminTab('options')">分類管理</button>
       </nav>
 
       <section class="panel admin-section active" data-admin-section="eventForm">
@@ -153,7 +176,7 @@
         </div>
         <label class="wide-field">備考<textarea id="eventNote"></textarea></label>
         <div class="button-row">
-          <button class="primary" type="button" onclick="saveEventForm()">予定を保存</button>
+          <button id="saveEventButton" class="primary" type="button" onclick="saveEventForm()">予定を保存</button>
           <button type="button" onclick="clearEventForm()">入力をクリア</button>
         </div>
         <div id="eventMessage" class="message"></div>
@@ -170,13 +193,14 @@
           <label>入会日<input id="joinDate" type="date"></label>
           <label>退会日<input id="leaveDate" type="date"></label>
           <label>在籍状態<select id="memberState"><option value="在籍">在籍</option><option value="休会">休会</option><option value="退会">退会</option></select></label>
-          <label>表示対象<select id="visible"><option value="true">表示する</option><option value="false">表示しない</option></select></label>
+          <label>現役名簿に表示<select id="visible"><option value="true">表示する</option><option value="false">表示しない</option></select></label>
           <label>衣装サイズ<input id="costumeSize" type="text"></label>
           <label>袋サイズ<input id="bagSize" type="text"></label>
         </div>
+        <p class="muted">「在籍状態」を退会にすると、退会日と現役名簿の非表示が自動で設定されます。過去の出欠履歴は消えません。</p>
         <label class="wide-field">備考<textarea id="memberNote"></textarea></label>
         <div class="button-row">
-          <button class="primary" type="button" onclick="saveMemberForm()">メンバーを保存</button>
+          <button id="saveMemberButton" class="primary" type="button" onclick="saveMemberForm()">メンバーを保存</button>
           <button type="button" onclick="clearMemberForm()">入力をクリア</button>
         </div>
         <div id="memberMessage" class="message"></div>
@@ -184,6 +208,7 @@
 
       <section class="panel admin-section" data-admin-section="eventList">
         <h2>予定一覧・日程調整リンク</h2>
+        <label class="inline-check"><input id="showArchivedEvents" type="checkbox" onchange="renderAdminEvents()"> 削除済みも表示する</label>
         <div id="adminEvents"></div>
       </section>
 
@@ -195,6 +220,24 @@
       <section class="panel admin-section" data-admin-section="logs">
         <h2>操作ログ</h2>
         <div id="adminLogs"></div>
+      </section>
+
+      <section class="panel admin-section" data-admin-section="options">
+        <h2>分類の選択肢を管理</h2>
+        <p class="muted">予定の「分類」と、日程調整回答の「理由カテゴリ」の選択肢を追加・削除できます。</p>
+        <div class="panel-head"><h3>予定の分類</h3></div>
+        <div id="eventCategoryOptions" class="option-manager"></div>
+        <div class="option-add">
+          <input id="newEventCategoryInput" type="text" placeholder="新しい分類名">
+          <button type="button" onclick="addOption('event_category', 'newEventCategoryInput')">追加</button>
+        </div>
+        <div class="panel-head"><h3>回答の理由カテゴリ</h3></div>
+        <div id="reasonCategoryOptions" class="option-manager"></div>
+        <div class="option-add">
+          <input id="newReasonCategoryInput" type="text" placeholder="新しい理由カテゴリ名">
+          <button type="button" onclick="addOption('reason_category', 'newReasonCategoryInput')">追加</button>
+        </div>
+        <div id="optionMessage" class="message"></div>
       </section>
     </section>
   </div>
