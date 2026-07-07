@@ -262,7 +262,35 @@ async function loadPublicData() {
   publicData.events = (events || []).map(event => buildPublicEvent(normalizeEvent(event), publicData.members, answers || []));
   setupPublicFilters();
   renderPublic();
+  populateAnswerEventSelect();
   if (isAdmin()) renderAdmin();
+}
+
+async function manualRefresh() {
+  const status = document.getElementById('refreshStatus');
+  if (status) {
+    status.textContent = 'loading...';
+    status.classList.remove('hidden');
+  }
+  await refreshAll();
+  if (status) {
+    status.textContent = '更新しました';
+    setTimeout(() => status.classList.add('hidden'), 1200);
+  }
+}
+
+let completionTimer = null;
+function flashCompletionOverlay(text) {
+  const overlay = document.getElementById('completionOverlay');
+  if (!overlay) return;
+  overlay.querySelector('.completion-badge').textContent = text;
+  overlay.classList.remove('hidden');
+  requestAnimationFrame(() => overlay.classList.add('show'));
+  clearTimeout(completionTimer);
+  completionTimer = setTimeout(() => {
+    overlay.classList.remove('show');
+    setTimeout(() => overlay.classList.add('hidden'), 300);
+  }, 1400);
 }
 
 function buildPublicEvent(event, members, answers) {
@@ -272,6 +300,7 @@ function buildPublicEvent(event, members, answers) {
     return {
       memberId: member.memberId,
       name: member.name,
+      shortName: member.shortName,
       grade: member.grade,
       memberState: member.memberState,
       visible: member.visible,
@@ -364,16 +393,45 @@ function renderEventMode(events) {
   list.innerHTML = groupByMonth(events).map(createMonthHtml).join('');
 }
 
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
 function createMonthHtml(group) {
   return `
     <details class="month" open>
       <summary><span>${escapeHtml(group.label)}</span><span>${group.events.length}件</span></summary>
       <div>
         ${createCategoryOverviewHtml(group.events)}
-        <div>${group.events.map(createEventRowHtml).join('')}</div>
+        <div>${groupByDay(group.events).map(createDayGroupHtml).join('')}</div>
       </div>
     </details>
   `;
+}
+
+function groupByDay(events) {
+  const map = new Map();
+  events.forEach(event => {
+    const key = event.date || 'unknown';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(event);
+  });
+  return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+function createDayGroupHtml([dateKey, dayEvents]) {
+  const date = parseDate(dateKey);
+  const label = date ? `${date.getMonth() + 1}/${date.getDate()}（${WEEKDAYS[date.getDay()]}）` : '日付未設定';
+  const today = isSameDay(date, new Date());
+  return `
+    <div class="day-group ${today ? 'is-today' : ''}">
+      <div class="day-heading">${escapeHtml(label)}${today ? '<span class="tag-muted">今日</span>' : ''}</div>
+      ${dayEvents.map(createEventRowHtml).join('')}
+    </div>
+  `;
+}
+
+function isSameDay(a, b) {
+  if (!a || !b) return false;
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 function createEventRowHtml(event) {
@@ -382,7 +440,7 @@ function createEventRowHtml(event) {
   const answerHtml = (event.answers || []).map(answer => `
     <div class="member-chip">
       <div class="member-head">
-        <span class="member-name">${escapeHtml(answer.name)}${memberTagHtml(answer)}</span>
+        <span class="member-name">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>
         <span class="badge ${statusClass(answer.status)}">${escapeHtml(answer.status)}</span>
       </div>
       ${answer.pendingUntil ? `<div class="comment">判明予定：${escapeHtml(formatDate(answer.pendingUntil))}</div>` : ''}
@@ -433,7 +491,7 @@ function renderSingleMemberMode(events, memberId, answerStatus) {
     return { ...event, answers: [answer] };
   }).filter(Boolean);
   const counts = countMemberStatuses(target.map(event => event.answers[0]));
-  status.textContent = `人主体：${member ? member.name : ''}の予定を${target.length}件表示中`;
+  status.textContent = `人主体：${member ? displayName(member) : ''}の予定を${target.length}件表示中`;
   list.className = '';
   list.innerHTML = createMemberSummaryHtml(counts) + (target.length ? groupByMonth(target).map(createMonthHtml).join('') : '<section class="empty">該当する予定がありません。</section>');
 }
@@ -455,7 +513,7 @@ function renderAllMembersMode(events, answerStatus) {
     const grouped = groupEventsByMemberStatus(events, member.memberId, answerStatus);
     return `
       <section class="member-card">
-        <h3>${escapeHtml(member.name)}${memberTagHtml(member)}</h3>
+        <h3>${escapeHtml(displayName(member))}${memberTagHtml(member)}</h3>
         ${STATUS_LIST.map(statusText => createStatusGroupHtml(`${statusText}の予定`, statusText, grouped[statusText])).join('')}
       </section>
     `;
@@ -480,7 +538,34 @@ function memberTagHtml(member) {
 
 function memberOptionLabel(member) {
   const label = memberStateLabel(member);
-  return label ? `${member.name}（${label}）` : member.name;
+  const base = displayName(member);
+  return label ? `${base}（${label}）` : base;
+}
+
+function displayName(member) {
+  return (member.shortName && member.shortName.trim()) || member.name;
+}
+
+function computeAge(birthDateStr) {
+  const birth = parseDate(birthDateStr);
+  if (!birth) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const hadBirthdayThisYear = today.getMonth() > birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
+  if (!hadBirthdayThisYear) age -= 1;
+  return age;
+}
+
+function isPastDeadline(event) {
+  const deadline = parseDate(event.answerDeadline);
+  if (!deadline) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today > deadline;
+}
+
+function isAnswerLocked(event) {
+  return isPastDeadline(event) && !isAdmin();
 }
 
 function formatReasonText(answer) {
@@ -550,11 +635,26 @@ function openAnswerInApp(token) {
   loadAnswerData(token);
 }
 
+function populateAnswerEventSelect() {
+  const select = document.getElementById('answerEventSelect');
+  if (!select) return;
+  const memberId = currentProfile ? currentProfile.member_id : null;
+  const events = publicData.events
+    .filter(event => event.publicState !== '削除')
+    .filter(event => !memberId || (event.answers || []).some(answer => answer.memberId === memberId))
+    .sort(compareEvents);
+  fillSelect('answerEventSelect', events.map(event => ({ value: event.answerToken, label: `${formatDate(event.date)} ${event.eventName}` })), '予定を選択してください');
+  if (answerData && answerData.event) select.value = answerData.event.answerToken;
+  select.onchange = () => {
+    if (select.value) openAnswerInApp(select.value);
+  };
+}
+
 function renderAnswerPage() {
+  populateAnswerEventSelect();
   if (!answerData || !answerData.event) return;
   const event = answerData.event;
   const timeText = [event.startTime, event.endTime].filter(Boolean).join(' - ') || '-';
-  document.getElementById('answerStatus').textContent = 'この予定への出欠を回答できます。';
   document.getElementById('answerEventBox').classList.remove('hidden');
   document.getElementById('answerEventBox').innerHTML = `
     <h3>${escapeHtml(event.eventName)}</h3>
@@ -566,17 +666,29 @@ function renderAnswerPage() {
       <div class="meta-label">期限</div><div>${escapeHtml(formatDate(event.answerDeadline) || '-')}</div>
       <div class="meta-label">備考</div><div>${escapeHtml(event.note || '-')}</div>
     </div>
-    <div style="margin-top:12px"><button type="button" onclick="switchView('public')">予定一覧へ戻る</button></div>
   `;
-  fillSelect('answerMember', answerData.members.map(member => ({ value: member.memberId, label: memberOptionLabel(member) })), '名前を選択');
-  document.getElementById('answerMember').value = currentProfile && currentProfile.member_id ? currentProfile.member_id : '';
-  document.getElementById('answerMember').onchange = updateAnswerFormForMember;
-  updateAnswerFormForMember();
-}
 
-function updateAnswerFormForMember() {
-  if (!answerData) return;
-  const memberId = document.getElementById('answerMember').value;
+  const memberId = currentProfile ? currentProfile.member_id : null;
+  const isEligible = Boolean(memberId) && answerData.members.some(member => member.memberId === memberId);
+  const fieldsBox = document.getElementById('answerFormFields');
+
+  if (!memberId) {
+    fieldsBox.classList.add('hidden');
+    document.getElementById('answerStatus').textContent = 'あなたのアカウントはメンバーに紐付けられていません。管理者に連絡してください。';
+    return;
+  }
+  if (!isEligible) {
+    fieldsBox.classList.add('hidden');
+    document.getElementById('answerStatus').textContent = 'この予定はあなたの在籍期間外のため回答できません。';
+    return;
+  }
+
+  fieldsBox.classList.remove('hidden');
+  const locked = isAnswerLocked(event);
+  document.getElementById('answerStatus').textContent = locked
+    ? `回答期限（${formatDate(event.answerDeadline)}）を過ぎているため、回答できません。変更が必要な場合は管理者に連絡してください。`
+    : 'この予定への出欠を回答できます。';
+
   const answer = (answerData.answers || []).find(item => item.memberId === memberId);
   document.getElementById('answerStatusSelect').value = answer && answer.status !== '未回答' ? answer.status : '';
   document.getElementById('pendingUntil').value = answer ? answer.pendingUntil || '' : '';
@@ -584,25 +696,42 @@ function updateAnswerFormForMember() {
   document.getElementById('answerReasonCategory').value = answer ? answer.reasonCategory || '' : '';
   document.getElementById('answerReason').value = answer ? answer.reasonDetail || '' : '';
   updatePendingVisibility();
-  updateClearAnswerVisibility(answer);
+  setAnswerFormDisabled(locked);
+  updateClearAnswerVisibility(answer, locked);
 }
 
-function updateClearAnswerVisibility(answer) {
+function setAnswerFormDisabled(disabled) {
+  ['answerStatusSelect', 'pendingUntil', 'answerReasonCategory', 'answerReason', 'answerComment', 'submitAnswerButton'].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.disabled = disabled;
+  });
+}
+
+function updateClearAnswerVisibility(answer, locked) {
   const button = document.getElementById('clearAnswerButton');
   if (!button) return;
-  button.classList.toggle('hidden', !answer || answer.status === '未回答');
+  button.classList.toggle('hidden', !answer || answer.status === '未回答' || locked);
 }
 
 async function submitAnswer() {
   if (!answerData || !answerData.event) {
-    showMessage('answerMessage', '日程調整リンクから開いてください。', false);
+    showMessage('answerMessage', '予定を選択してください。', false);
+    return;
+  }
+  const memberId = currentProfile ? currentProfile.member_id : null;
+  if (!memberId) {
+    showMessage('answerMessage', 'あなたのアカウントはメンバーに紐付けられていません。', false);
+    return;
+  }
+  if (isAnswerLocked(answerData.event)) {
+    showMessage('answerMessage', '回答期限を過ぎているため送信できません。', false);
     return;
   }
 
   const status = document.getElementById('answerStatusSelect').value;
   const payload = {
     event_id: answerData.event.eventId,
-    member_id: document.getElementById('answerMember').value,
+    member_id: memberId,
     status,
     pending_until: status === '未定' ? nullIfEmpty(document.getElementById('pendingUntil').value) : null,
     comment: document.getElementById('answerComment').value.trim(),
@@ -611,8 +740,8 @@ async function submitAnswer() {
     updated_at: new Date().toISOString()
   };
 
-  if (!payload.member_id || !payload.status) {
-    showMessage('answerMessage', '名前と回答区分を選択してください。', false);
+  if (!payload.status) {
+    showMessage('answerMessage', '回答区分を選択してください。', false);
     return;
   }
 
@@ -633,14 +762,19 @@ async function submitAnswer() {
   const member = publicData.members.find(item => item.memberId === payload.member_id);
   await appendLog('日程調整回答', answerData.event.eventId, answerData.event.eventName, payload.member_id, member ? member.name : '', previous ? previous.status : '未回答', payload.status, payload.comment || payload.reason_detail);
   showMessage('answerMessage', '回答を反映しました。', true);
+  flashCompletionOverlay('回答を送信しました');
   await refreshAll();
   await loadAnswerData(currentAnswerToken);
 }
 
 async function clearAnswer() {
   if (!answerData || !answerData.event) return;
-  const memberId = document.getElementById('answerMember').value;
+  const memberId = currentProfile ? currentProfile.member_id : null;
   if (!memberId) return;
+  if (isAnswerLocked(answerData.event)) {
+    showMessage('answerMessage', '回答期限を過ぎているため取り消せません。', false);
+    return;
+  }
   if (!confirm('この回答を取り消して未回答に戻しますか？')) return;
 
   const button = document.getElementById('clearAnswerButton');
@@ -701,7 +835,7 @@ function handleAdminEventsClick(domEvent) {
   if (editButton) editEvent(editButton.dataset.editEvent);
   else if (deleteButton) deleteEvent(deleteButton.dataset.deleteEvent);
   else if (restoreButton) restoreEvent(restoreButton.dataset.restoreEvent);
-  else if (copyButton) copyShareText(copyButton.dataset.copyShare);
+  else if (copyButton) copyShareText(copyButton.dataset.copyShare, copyButton);
 }
 
 function handleAdminMembersClick(domEvent) {
@@ -713,7 +847,7 @@ function handlePublicListClick(domEvent) {
   const answerButton = domEvent.target.closest('[data-open-answer]');
   const copyButton = domEvent.target.closest('[data-copy-share]');
   if (answerButton) openAnswerInApp(answerButton.dataset.openAnswer);
-  else if (copyButton) copyShareText(copyButton.dataset.copyShare);
+  else if (copyButton) copyShareText(copyButton.dataset.copyShare, copyButton);
 }
 
 function handleOptionRemoveClick(domEvent) {
@@ -754,23 +888,31 @@ function renderAdminEvents() {
 }
 
 function renderAdminMembers() {
-  const rows = publicData.members.map(member => `
+  const rows = publicData.members.map(member => {
+    const age = computeAge(member.birthDate);
+    const birthDateHtml = member.birthDate
+      ? `${escapeHtml(formatDate(member.birthDate))}${age !== null ? `<span class="muted"> (${age}歳)</span>` : ''}`
+      : '';
+    return `
     <tr>
       <td>${escapeHtml(member.visible ? '表示' : '非表示')}</td>
       <td>${escapeHtml(member.memberState)}</td>
       <td>${escapeHtml(member.name)}</td>
+      <td>${escapeHtml(member.shortName || '')}</td>
       <td>${escapeHtml(member.grade)}</td>
-      <td>${escapeHtml(member.age === '' || member.age === null || member.age === undefined ? '' : String(member.age))}</td>
+      <td>${birthDateHtml}</td>
       <td class="wrap">${escapeHtml(member.contact || '')}</td>
       <td>${escapeHtml(member.joinDate ? formatDate(member.joinDate) : '')}</td>
       <td>${escapeHtml(member.leaveDate ? formatDate(member.leaveDate) : '')}</td>
       <td>${escapeHtml(member.costumeSize || '')}</td>
-      <td>${escapeHtml(member.bagSize || '')}</td>
+      <td>${escapeHtml(member.tshirtSize || '')}</td>
+      <td>${escapeHtml(member.duty || '')}</td>
       <td class="wrap">${escapeHtml(member.note || '')}</td>
       <td><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button></td>
     </tr>
-  `).join('');
-  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>表示</th><th>状態</th><th>名前</th><th>学年</th><th>年齢</th><th>連絡先</th><th>入会日</th><th>退会日</th><th>衣装</th><th>袋</th><th>備考</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="12">メンバーがいません。</td></tr>'}</tbody></table></div>`;
+  `;
+  }).join('');
+  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>表示</th><th>状態</th><th>氏名</th><th>表示名</th><th>学年</th><th>生年月日</th><th>電話番号</th><th>入会日</th><th>退会日</th><th>衣装</th><th>Tシャツ</th><th>担当</th><th>備考</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="14">メンバーがいません。</td></tr>'}</tbody></table></div>`;
 }
 
 async function renderAdminLogs() {
@@ -900,19 +1042,27 @@ async function saveMemberForm() {
     document.getElementById('leaveDate').value = leaveDate;
   }
 
+  const phone = document.getElementById('contact').value.trim();
+  if (phone && !/^[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4}$/.test(phone)) {
+    showMessage('memberMessage', '電話番号は「090-1234-5678」のようにハイフン区切りで入力してください。', false);
+    return;
+  }
+
   const isEdit = Boolean(document.getElementById('memberId').value);
   const payload = {
     id: memberId,
     name,
+    short_name: document.getElementById('shortName').value.trim(),
     grade: document.getElementById('grade').value.trim(),
-    age: nullIfEmpty(document.getElementById('age').value),
-    contact: document.getElementById('contact').value.trim(),
+    birth_date: nullIfEmpty(document.getElementById('birthDate').value),
+    contact: phone,
     join_date: nullIfEmpty(document.getElementById('joinDate').value),
     leave_date: leaveDate,
     member_state: memberState,
     visible: document.getElementById('visible').value === 'true',
     costume_size: document.getElementById('costumeSize').value.trim(),
-    bag_size: document.getElementById('bagSize').value.trim(),
+    tshirt_size: document.getElementById('tshirtSize').value.trim(),
+    duty: document.getElementById('duty').value.trim(),
     note: document.getElementById('memberNote').value.trim(),
     updated_at: new Date().toISOString()
   };
@@ -938,21 +1088,23 @@ function editMember(memberId) {
   switchAdminTab('memberForm');
   document.getElementById('memberId').value = member.memberId || '';
   document.getElementById('memberName').value = member.name || '';
+  document.getElementById('shortName').value = member.shortName || '';
   document.getElementById('grade').value = member.grade || '';
-  document.getElementById('age').value = member.age || '';
+  document.getElementById('birthDate').value = member.birthDate || '';
   document.getElementById('contact').value = member.contact || '';
   document.getElementById('joinDate').value = member.joinDate || '';
   document.getElementById('leaveDate').value = member.leaveDate || '';
   document.getElementById('memberState').value = member.memberState || '在籍';
   document.getElementById('visible').value = member.visible ? 'true' : 'false';
   document.getElementById('costumeSize').value = member.costumeSize || '';
-  document.getElementById('bagSize').value = member.bagSize || '';
+  document.getElementById('tshirtSize').value = member.tshirtSize || '';
+  document.getElementById('duty').value = member.duty || '';
   document.getElementById('memberNote').value = member.note || '';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function clearMemberForm() {
-  ['memberId', 'memberName', 'grade', 'age', 'contact', 'joinDate', 'leaveDate', 'costumeSize', 'bagSize', 'memberNote'].forEach(id => {
+  ['memberId', 'memberName', 'shortName', 'grade', 'birthDate', 'contact', 'joinDate', 'leaveDate', 'costumeSize', 'tshirtSize', 'duty', 'memberNote'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('memberState').value = '在籍';
@@ -1060,15 +1212,29 @@ function createScheduleUrl(token) {
   return `${base}?schedule=${encodeURIComponent(token)}`;
 }
 
-function copyShareText(eventId) {
+function copyShareText(eventId, buttonEl) {
   const event = publicData.events.find(item => item.eventId === eventId);
   if (!event) return;
   const text = createShareText(event);
+  const onDone = () => flashButtonText(buttonEl, 'コピーしました');
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => showTemporaryStatus('共有文をコピーしました。')).catch(() => showSharePrompt(text));
+    navigator.clipboard.writeText(text).then(onDone).catch(() => showSharePrompt(text));
   } else {
     showSharePrompt(text);
   }
+}
+
+function flashButtonText(button, text) {
+  if (!button) return;
+  if (button.dataset.flashTimer) clearTimeout(Number(button.dataset.flashTimer));
+  if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
+  button.textContent = text;
+  const timer = setTimeout(() => {
+    button.textContent = button.dataset.originalText;
+    delete button.dataset.originalText;
+    delete button.dataset.flashTimer;
+  }, 1500);
+  button.dataset.flashTimer = String(timer);
 }
 
 function createShareText(event) {
@@ -1081,20 +1247,20 @@ function createShareText(event) {
   ].join('\n');
 }
 
-function showTemporaryStatus(text) {
-  const status = document.getElementById('publicStatus');
-  if (status) status.textContent = text;
-}
-
 function showSharePrompt(text) {
   window.prompt('共有文をコピーしてください。', text);
 }
 
 function getEligibleMembers(event, members) {
   const eventDate = parseDate(event.date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   return members.filter(member => {
     const joinDate = parseDate(member.joinDate);
-    const leaveDate = parseDate(member.leaveDate);
+    // 退会扱いなのに退会日が未入力だと日付ベースの判定が効かず、現在・今後の予定に
+    // 出続けてしまうため、その場合は「今日」を退会日とみなして扱う。
+    let leaveDate = parseDate(member.leaveDate);
+    if (!leaveDate && member.memberState === '退会') leaveDate = today;
     if (eventDate && joinDate && eventDate < joinDate) return false;
     if (eventDate && leaveDate && eventDate >= leaveDate) return false;
     return true;
@@ -1125,15 +1291,17 @@ function normalizeMember(row) {
   return {
     memberId: row.id,
     name: row.name,
+    shortName: row.short_name || '',
     grade: row.grade || '',
-    age: row.age || '',
+    birthDate: normalizeDate(row.birth_date),
     contact: row.contact || '',
     joinDate: normalizeDate(row.join_date),
     leaveDate: normalizeDate(row.leave_date),
     memberState: row.member_state || '在籍',
     note: row.note || '',
     costumeSize: row.costume_size || '',
-    bagSize: row.bag_size || '',
+    tshirtSize: row.tshirt_size || '',
+    duty: row.duty || '',
     visible: row.visible !== false,
     createdAt: row.created_at || '',
     updatedAt: row.updated_at || ''

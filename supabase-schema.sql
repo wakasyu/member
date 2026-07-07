@@ -1,5 +1,82 @@
 create extension if not exists pgcrypto;
 
+-- 一部のプロジェクトではservice_role（Edge Functionなどサーバー側からの操作）に
+-- テーブルへのGRANTが不足していることがあるため明示しておく。
+-- (RLSはbypassされてもテーブル自体へのGRANTが無いとpermission deniedになる)
+grant usage on schema public to service_role;
+grant select, insert, update, delete on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to service_role;
+alter default privileges in schema public grant select, insert, update, delete on tables to service_role;
+
+-- Database Webhook（メール通知など）で使う。Supabaseダッシュボードの
+-- Database > Webhooks からWebhookを1つ以上作ると自動で有効化されるインフラだが、
+-- SQLからも明示的にセットアップしておく。
+create extension if not exists pg_net;
+
+create schema if not exists supabase_functions;
+
+create table if not exists supabase_functions.hooks (
+  id bigserial primary key,
+  hook_table_id integer not null,
+  hook_name text not null,
+  created_at timestamptz default now(),
+  request_id bigint
+);
+
+create index if not exists supabase_functions_hooks_request_id_idx on supabase_functions.hooks using btree (request_id);
+create index if not exists supabase_functions_hooks_h_table_id_h_name_idx on supabase_functions.hooks using btree (hook_table_id, hook_name);
+
+create or replace function supabase_functions.http_request()
+returns trigger
+language plpgsql
+as $$
+declare
+  request_id bigint;
+  payload jsonb;
+  url text := TG_ARGV[0]::text;
+  method text := TG_ARGV[1]::text;
+  headers jsonb default '{}'::jsonb;
+  params jsonb default '{}'::jsonb;
+  timeout_ms integer default 1000;
+begin
+  if url is null or method is null then
+    raise exception 'url and method are required';
+  end if;
+
+  if TG_ARGV[2] is null then
+    headers = '{"Content-Type":"application/json"}'::jsonb;
+  else
+    headers = TG_ARGV[2]::jsonb;
+  end if;
+
+  if TG_ARGV[3] is null then
+    params = '{}'::jsonb;
+  else
+    params = TG_ARGV[3]::jsonb;
+  end if;
+
+  if TG_ARGV[4] is null then
+    timeout_ms = 1000;
+  else
+    timeout_ms = TG_ARGV[4]::integer;
+  end if;
+
+  case
+    when method = 'GET' then
+      select net.http_get(url, params, headers, timeout_ms) into request_id;
+    when method = 'POST' then
+      payload = jsonb_build_object('old_record', OLD, 'record', NEW, 'type', TG_OP, 'table', TG_TABLE_NAME, 'schema', TG_TABLE_SCHEMA);
+      select net.http_post(url, payload, params, headers, timeout_ms) into request_id;
+    else
+      raise exception 'method argument % is invalid', method;
+  end case;
+
+  insert into supabase_functions.hooks(hook_table_id, hook_name, request_id) values (TG_RELID, TG_NAME, request_id);
+
+  return NEW;
+end
+$$;
+
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null default '',
@@ -29,6 +106,16 @@ create table if not exists public.members (
 -- 同姓同名の登録を防ぐ（人主体表示は名前ではなくIDで名寄せするが、念のためDBでも重複を防止する）
 create unique index if not exists members_name_unique_idx on public.members (lower(name));
 
+-- 予定一覧などフルネームを出したくない場面用の表示名（空なら氏名をそのまま使う）
+alter table public.members add column if not exists short_name text not null default '';
+-- 年齢は日々古くなるため、生年月日を保持して画面側で年齢を計算する（age列は使わなくなるが残す）
+alter table public.members add column if not exists birth_date date null;
+-- Tシャツサイズを追加。袋サイズ(bag_size)は運用上不要になったためアプリの画面からは外すが、
+-- 既存データを消さないよう列自体は残す。
+alter table public.members add column if not exists tshirt_size text not null default '';
+-- 担当（役割）を管理できるようにする
+alter table public.members add column if not exists duty text not null default '';
+
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -48,6 +135,9 @@ create table if not exists public.events (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- 対象メンバー全員が回答し終わった時の「完了メール」を二重送信しないための記録用
+alter table public.events add column if not exists completion_notified_at timestamptz null;
 
 create table if not exists public.answers (
   id uuid primary key default gen_random_uuid(),
@@ -239,6 +329,23 @@ using (true);
 
 -- 出欠回答は「本人の分」か管理者だけが書き込み/削除できるようにする
 -- (以前は認証済みなら誰でも他人の回答を書き換えられた)
+-- さらに回答期限を過ぎた予定は、管理者以外は書き込み/削除できないようにする
+-- (画面側の入力欄無効化だけだとAPIを直接叩けば回避できてしまうため)
+create or replace function public.answer_deadline_ok(target_event_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select not exists (
+    select 1 from public.events e
+    where e.id = target_event_id
+      and e.answer_deadline is not null
+      and e.answer_deadline < current_date
+  );
+$$;
+
 drop policy if exists "answers write authenticated" on public.answers;
 drop policy if exists "answers insert self or admin" on public.answers;
 create policy "answers insert self or admin"
@@ -246,7 +353,10 @@ on public.answers for insert
 to authenticated
 with check (
   public.is_admin()
-  or member_id = (select member_id from public.profiles where id = auth.uid())
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.answer_deadline_ok(event_id)
+  )
 );
 
 drop policy if exists "answers update authenticated" on public.answers;
@@ -260,7 +370,10 @@ using (
 )
 with check (
   public.is_admin()
-  or member_id = (select member_id from public.profiles where id = auth.uid())
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.answer_deadline_ok(event_id)
+  )
 );
 
 drop policy if exists "answers delete admin" on public.answers;
@@ -270,7 +383,10 @@ on public.answers for delete
 to authenticated
 using (
   public.is_admin()
-  or member_id = (select member_id from public.profiles where id = auth.uid())
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.answer_deadline_ok(event_id)
+  )
 );
 
 drop policy if exists "logs read authenticated" on public.logs;
@@ -379,3 +495,20 @@ where not exists (
 -- insert into public.profiles (id, display_name, role)
 -- values ('ADMIN_USER_UUID', '管理者', 'admin')
 -- on conflict (id) do update set role = 'admin', display_name = excluded.display_name;
+
+-- メール通知（回答時・全員回答完了時）を有効にする場合だけ実行：
+-- 1. supabase/functions/notify-answer を `supabase functions deploy notify-answer --no-verify-jwt` でデプロイする
+-- 2. `supabase secrets set RESEND_API_KEY=... ADMIN_NOTIFY_EMAIL=... NOTIFY_FROM_EMAIL=... WEBHOOK_SECRET=...` を設定する
+-- 3. 下のSQLの YOUR_PROJECT_REF と YOUR_WEBHOOK_SECRET を実際の値に置き換えて実行する
+--    （WEBHOOK_SECRETは他人にこの関数を叩かれないための合言葉。secretsに設定したものと同じ値にする）
+--
+-- drop trigger if exists notify_answer_change on public.answers;
+-- create trigger notify_answer_change
+-- after insert or update on public.answers
+-- for each row execute function supabase_functions.http_request(
+--   'https://YOUR_PROJECT_REF.supabase.co/functions/v1/notify-answer',
+--   'POST',
+--   '{"Content-type":"application/json","x-webhook-secret":"YOUR_WEBHOOK_SECRET"}',
+--   '{}',
+--   '5000'
+-- );

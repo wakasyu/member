@@ -63,7 +63,10 @@
         <p id="userMeta" class="muted">読み込み中...</p>
       </div>
       <div class="header-actions">
-        <button type="button" onclick="refreshAll()">更新</button>
+        <div>
+          <button type="button" onclick="manualRefresh()">更新</button>
+          <p id="refreshStatus" class="muted refresh-status hidden"></p>
+        </div>
         <button type="button" onclick="signOut()">ログアウト</button>
       </div>
     </header>
@@ -107,44 +110,46 @@
     <section id="answerView" class="view">
       <section class="panel">
         <h2>日程調整回答</h2>
-        <div id="answerStatus" class="status">予定一覧の日程調整リンク、または共有URLから回答できます。</div>
+        <label class="wide-field">
+          予定を選択
+          <select id="answerEventSelect"><option value="">予定を選択してください</option></select>
+        </label>
+        <div id="answerStatus" class="status">予定を選択すると回答できます。</div>
         <div id="answerEventBox" class="answer-event hidden"></div>
-        <div class="grid">
-          <label>
-            名前
-            <select id="answerMember"></select>
+        <div id="answerFormFields" class="hidden">
+          <div class="grid">
+            <label>
+              回答区分
+              <select id="answerStatusSelect" onchange="updatePendingVisibility()">
+                <option value="">選択してください</option>
+                <option value="参加">参加</option>
+                <option value="不参加">不参加</option>
+                <option value="未定">未定</option>
+              </select>
+            </label>
+            <label id="pendingField" class="hidden">
+              いつまでに分かるか
+              <input id="pendingUntil" type="date">
+            </label>
+            <label>
+              理由カテゴリ
+              <select id="answerReasonCategory"><option value="">選択なし</option></select>
+            </label>
+          </div>
+          <label class="wide-field">
+            理由詳細
+            <input id="answerReason" type="text" placeholder="任意">
           </label>
-          <label>
-            回答区分
-            <select id="answerStatusSelect" onchange="updatePendingVisibility()">
-              <option value="">選択してください</option>
-              <option value="参加">参加</option>
-              <option value="不参加">不参加</option>
-              <option value="未定">未定</option>
-            </select>
+          <label class="wide-field">
+            コメント
+            <textarea id="answerComment" placeholder="遅れて参加、途中退出など"></textarea>
           </label>
-          <label id="pendingField" class="hidden">
-            いつまでに分かるか
-            <input id="pendingUntil" type="date">
-          </label>
-          <label>
-            理由カテゴリ
-            <select id="answerReasonCategory"><option value="">選択なし</option></select>
-          </label>
+          <div class="button-row">
+            <button id="submitAnswerButton" class="primary" type="button" onclick="submitAnswer()">回答を送信</button>
+            <button id="clearAnswerButton" class="danger hidden" type="button" onclick="clearAnswer()">回答を取り消す（未回答に戻す）</button>
+          </div>
+          <div id="answerMessage" class="message"></div>
         </div>
-        <label class="wide-field">
-          理由詳細
-          <input id="answerReason" type="text" placeholder="任意">
-        </label>
-        <label class="wide-field">
-          コメント
-          <textarea id="answerComment" placeholder="遅れて参加、途中退出など"></textarea>
-        </label>
-        <div class="button-row">
-          <button id="submitAnswerButton" class="primary" type="button" onclick="submitAnswer()">回答を送信</button>
-          <button id="clearAnswerButton" class="danger hidden" type="button" onclick="clearAnswer()">回答を取り消す（未回答に戻す）</button>
-        </div>
-        <div id="answerMessage" class="message"></div>
       </section>
     </section>
 
@@ -186,16 +191,18 @@
         <h2>メンバー追加・編集</h2>
         <input id="memberId" type="hidden">
         <div class="grid4">
-          <label>名前<input id="memberName" type="text"></label>
+          <label>名前（フルネーム）<input id="memberName" type="text"></label>
+          <label>表示名（苗字など・空欄なら氏名を使用）<input id="shortName" type="text" placeholder="例：山田"></label>
           <label>学年<input id="grade" type="text"></label>
-          <label>年齢<input id="age" type="number" min="0"></label>
-          <label>連絡先<input id="contact" type="text"></label>
+          <label>生年月日<input id="birthDate" type="date"></label>
+          <label>電話番号<input id="contact" type="tel" placeholder="090-1234-5678"></label>
           <label>入会日<input id="joinDate" type="date"></label>
           <label>退会日<input id="leaveDate" type="date"></label>
           <label>在籍状態<select id="memberState"><option value="在籍">在籍</option><option value="休会">休会</option><option value="退会">退会</option></select></label>
           <label>現役名簿に表示<select id="visible"><option value="true">表示する</option><option value="false">表示しない</option></select></label>
           <label>衣装サイズ<input id="costumeSize" type="text"></label>
-          <label>袋サイズ<input id="bagSize" type="text"></label>
+          <label>Tシャツサイズ<input id="tshirtSize" type="text"></label>
+          <label>担当<input id="duty" type="text"></label>
         </div>
         <p class="muted">「在籍状態」を退会にすると、退会日と現役名簿の非表示が自動で設定されます。過去の出欠履歴は消えません。</p>
         <label class="wide-field">備考<textarea id="memberNote"></textarea></label>
@@ -240,6 +247,10 @@
         <div id="optionMessage" class="message"></div>
       </section>
     </section>
+  </div>
+
+  <div id="completionOverlay" class="completion-overlay hidden">
+    <div class="completion-badge"></div>
   </div>
 </body>
 </html>

@@ -259,6 +259,21 @@ textarea {
   gap: 8px;
 }
 
+.header-actions {
+  align-items: flex-start;
+}
+
+.header-actions > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.refresh-status {
+  margin: 0;
+  font-size: 12px;
+}
+
 .tabs,
 .subtabs,
 .toolbar,
@@ -418,6 +433,27 @@ textarea {
 
 .event-row.is-archived {
   background: var(--surface-2);
+}
+
+.day-group {
+  padding-top: 6px;
+}
+
+.day-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 16px 8px;
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--main-2);
+  border-left: 3px solid var(--main-border);
+  padding-left: 8px;
+}
+
+.day-group.is-today .day-heading {
+  border-left-color: var(--accent);
+  color: var(--accent-2);
 }
 
 .event-row:last-child {
@@ -680,6 +716,39 @@ td.wrap {
 
 .option-add input {
   flex: 1;
+}
+
+.completion-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgba(18, 59, 110, 0);
+  pointer-events: none;
+  transition: background-color .25s ease;
+}
+
+.completion-overlay.show {
+  background: rgba(18, 59, 110, .55);
+}
+
+.completion-badge {
+  background: #fff;
+  color: var(--main-2);
+  border-radius: 14px;
+  padding: 20px 32px;
+  font-size: 20px;
+  font-weight: 900;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+  opacity: 0;
+  transform: scale(.9);
+  transition: opacity .25s ease, transform .25s ease;
+}
+
+.completion-overlay.show .completion-badge {
+  opacity: 1;
+  transform: scale(1);
 }
 
 @media (max-width: 920px) {
