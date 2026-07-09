@@ -56,6 +56,11 @@
   </div>
 
   <div id="appShell" class="shell hidden">
+    <div id="topPhotoBackdrop" class="top-photo-backdrop hidden" aria-hidden="true">
+      <div id="topHeroMedia" class="top-hero-media"></div>
+      <div class="top-hero-scrim"></div>
+    </div>
+
     <header class="site-header">
       <div>
         <p class="eyebrow">WAKASHU MEMBERS</p>
@@ -79,19 +84,15 @@
     </nav>
 
     <section id="topView" class="view active">
-      <div class="top-hero">
-        <div id="topHeroMedia" class="top-hero-media" aria-hidden="true"></div>
-        <div class="top-hero-scrim" aria-hidden="true"></div>
-        <div class="top-hero-title">
-          <div class="top-hero-mark">若衆</div>
-          <h1>若衆メンバー専用サイト</h1>
-          <p>練習・演奏の記録とともに</p>
+      <div class="top-hero-panel">
+        <div class="top-hero-mark">若衆</div>
+        <h1>若衆メンバー専用サイト</h1>
+        <p>練習・演奏の記録とともに</p>
+        <div class="top-hero-highlights">
+          <div id="topNextEvent" class="top-hero-stat"></div>
+          <div id="topPendingAnswers" class="top-hero-stat"></div>
         </div>
         <div id="topHeroDots" class="top-hero-dots"></div>
-      </div>
-      <div class="top-highlights">
-        <div id="topNextEvent" class="highlight-card"></div>
-        <div id="topPendingAnswers" class="highlight-card"></div>
       </div>
     </section>
 

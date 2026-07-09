@@ -1171,24 +1171,10 @@ function switchView(name) {
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
   document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
   document.getElementById(`${name}View`).classList.add('active');
-  if (name === 'top') sizeTopHero();
+  document.body.classList.toggle('top-active', name === 'top');
+  const backdrop = document.getElementById('topPhotoBackdrop');
+  if (backdrop) backdrop.classList.toggle('hidden', name !== 'top');
 }
-
-function sizeTopHero() {
-  const hero = document.querySelector('.top-hero');
-  const topView = document.getElementById('topView');
-  if (!hero || !topView || !topView.classList.contains('active')) return;
-  const top = hero.getBoundingClientRect().top + window.scrollY;
-  const available = window.innerHeight - top - 16;
-  hero.style.height = `${Math.max(320, Math.round(available))}px`;
-}
-
-let topHeroResizeTimer = null;
-window.addEventListener('resize', () => {
-  clearTimeout(topHeroResizeTimer);
-  topHeroResizeTimer = setTimeout(sizeTopHero, 150);
-});
-window.addEventListener('load', sizeTopHero);
 
 let topHeroSlides = [];
 let topHeroIndex = 0;
