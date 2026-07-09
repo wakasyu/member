@@ -764,6 +764,7 @@ td.wrap {
 
 .top-hero {
   position: relative;
+  height: 66vh;
   min-height: 360px;
   border-radius: 12px;
   overflow: hidden;
