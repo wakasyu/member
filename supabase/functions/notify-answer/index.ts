@@ -1,9 +1,9 @@
 // Supabase Edge Function: notify-answer
 //
 // Database Webhook（answersテーブルへのinsert/update）から呼び出される想定。
-// 1. 回答が入るたびに管理者へ「〇〇さんが回答しました」メールを送る
-// 2. 対象メンバー全員の回答が揃ったら「全員分そろいました」メールを1回だけ送る
-//    （events.completion_notified_at で二重送信を防ぐ）
+// 対象メンバー全員の回答が揃ったタイミングでだけ、管理者へ「全員分そろいました」
+// メールを1回送る（events.completion_notified_at で二重送信を防ぐ）。
+// 回答1件ごとの通知は送らない。
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -31,34 +31,22 @@ Deno.serve(async (req) => {
 
   const payload = await req.json().catch(() => null);
   const record = payload?.record;
-  if (!record?.event_id || !record?.member_id) {
+  if (!record?.event_id) {
     return new Response("ignored", { status: 200 });
   }
 
-  const [{ data: event, error: eventError }, { data: member, error: memberError }] = await Promise.all([
-    supabase.from("events").select("*").eq("id", record.event_id).maybeSingle(),
-    supabase.from("members").select("*").eq("id", record.member_id).maybeSingle(),
-  ]);
+  const { data: event, error: eventError } = await supabase
+    .from("events")
+    .select("*")
+    .eq("id", record.event_id)
+    .maybeSingle();
 
-  if (!event || !member) {
-    console.error("lookup failed", { eventError, memberError, event_id: record.event_id, member_id: record.member_id });
-    return new Response("event or member not found", { status: 200 });
+  if (!event) {
+    console.error("lookup failed", { eventError, event_id: record.event_id });
+    return new Response("event not found", { status: 200 });
   }
 
-  const memberName = member.short_name || member.name;
-  const statusText = record.status || "未回答";
-
   try {
-    await sendEmail({
-      to: ADMIN_NOTIFY_EMAIL,
-      subject: `[若衆] ${memberName}さんが「${event.name}」に回答しました`,
-      text: [
-        `${memberName}さんが「${event.name}」（${event.date}）に回答しました。`,
-        `回答区分：${statusText}`,
-        record.comment ? `コメント：${record.comment}` : "",
-      ].filter(Boolean).join("\n"),
-    });
-
     await maybeNotifyCompletion(event);
   } catch (error) {
     console.error(error);

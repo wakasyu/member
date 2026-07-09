@@ -26,9 +26,15 @@ create table if not exists supabase_functions.hooks (
 create index if not exists supabase_functions_hooks_request_id_idx on supabase_functions.hooks using btree (request_id);
 create index if not exists supabase_functions_hooks_h_table_id_h_name_idx on supabase_functions.hooks using btree (hook_table_id, hook_name);
 
+-- security definerが無いと、一般メンバーがanswersに書き込んだ際にこのトリガーが
+-- 「呼び出したメンバー自身の権限」で実行されてしまい、supabase_functionsスキーマに
+-- アクセスできず "permission denied for schema supabase_functions" になる。
+-- 関数の所有者（管理者権限）で実行されるようにする。
 create or replace function supabase_functions.http_request()
 returns trigger
 language plpgsql
+security definer
+set search_path = supabase_functions, net, public
 as $$
 declare
   request_id bigint;
@@ -76,6 +82,10 @@ begin
   return NEW;
 end
 $$;
+
+grant usage on schema supabase_functions to postgres, anon, authenticated, service_role;
+grant all on supabase_functions.hooks to postgres, anon, authenticated, service_role;
+grant usage on schema net to postgres, anon, authenticated, service_role;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
