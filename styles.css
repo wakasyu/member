@@ -31,6 +31,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow-x: hidden;
 }
 
 button,
@@ -772,6 +773,17 @@ td.wrap {
   margin-bottom: 16px;
   background: var(--main-2);
   color: #fff;
+}
+
+@media (min-width: 921px) {
+  .top-hero {
+    width: 100vw;
+    left: 50%;
+    right: 50%;
+    margin-left: -50vw;
+    margin-right: -50vw;
+    border-radius: 0;
+  }
 }
 
 .top-hero-media {
