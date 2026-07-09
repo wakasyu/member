@@ -641,13 +641,32 @@ function populateAnswerEventSelect() {
   const memberId = currentProfile ? currentProfile.member_id : null;
   const events = publicData.events
     .filter(event => event.publicState !== '削除')
-    .filter(event => !memberId || (event.answers || []).some(answer => answer.memberId === memberId))
+    .filter(event => isAdmin() || !memberId || (event.answers || []).some(answer => answer.memberId === memberId))
     .sort(compareEvents);
   fillSelect('answerEventSelect', events.map(event => ({ value: event.answerToken, label: `${formatDate(event.date)} ${event.eventName}` })), '予定を選択してください');
   if (answerData && answerData.event) select.value = answerData.event.answerToken;
   select.onchange = () => {
     if (select.value) openAnswerInApp(select.value);
   };
+}
+
+function populateAnswerMemberSelect() {
+  const select = document.getElementById('answerMemberSelect');
+  if (!select || !answerData) return;
+  fillSelect('answerMemberSelect', answerData.members.map(member => ({ value: member.memberId, label: memberOptionLabel(member) })), 'メンバーを選択');
+  if (!select.value && currentProfile && currentProfile.member_id) {
+    const ownEligible = answerData.members.some(member => member.memberId === currentProfile.member_id);
+    if (ownEligible) select.value = currentProfile.member_id;
+  }
+  select.onchange = () => renderAnswerPage();
+}
+
+function getEffectiveMemberId() {
+  if (isAdmin()) {
+    const select = document.getElementById('answerMemberSelect');
+    return select ? select.value : '';
+  }
+  return currentProfile ? currentProfile.member_id : null;
 }
 
 function renderAnswerPage() {
@@ -668,18 +687,28 @@ function renderAnswerPage() {
     </div>
   `;
 
-  const memberId = currentProfile ? currentProfile.member_id : null;
+  const memberSelectWrap = document.getElementById('answerMemberFieldWrap');
+  if (isAdmin()) {
+    memberSelectWrap.classList.remove('hidden');
+    populateAnswerMemberSelect();
+  } else {
+    memberSelectWrap.classList.add('hidden');
+  }
+
+  const memberId = getEffectiveMemberId();
   const isEligible = Boolean(memberId) && answerData.members.some(member => member.memberId === memberId);
   const fieldsBox = document.getElementById('answerFormFields');
 
   if (!memberId) {
     fieldsBox.classList.add('hidden');
-    document.getElementById('answerStatus').textContent = 'あなたのアカウントはメンバーに紐付けられていません。管理者に連絡してください。';
+    document.getElementById('answerStatus').textContent = isAdmin()
+      ? 'この予定に対象メンバーがいません。'
+      : 'あなたのアカウントはメンバーに紐付けられていません。管理者に連絡してください。';
     return;
   }
   if (!isEligible) {
     fieldsBox.classList.add('hidden');
-    document.getElementById('answerStatus').textContent = 'この予定はあなたの在籍期間外のため回答できません。';
+    document.getElementById('answerStatus').textContent = 'この予定は在籍期間外のため回答できません。';
     return;
   }
 
@@ -713,14 +742,19 @@ function updateClearAnswerVisibility(answer, locked) {
   button.classList.toggle('hidden', !answer || answer.status === '未回答' || locked);
 }
 
+function proxyLogSuffix(memberId) {
+  const actingForSelf = !isAdmin() || memberId === (currentProfile && currentProfile.member_id);
+  return actingForSelf ? '' : '（管理者代理入力）';
+}
+
 async function submitAnswer() {
   if (!answerData || !answerData.event) {
     showMessage('answerMessage', '予定を選択してください。', false);
     return;
   }
-  const memberId = currentProfile ? currentProfile.member_id : null;
+  const memberId = getEffectiveMemberId();
   if (!memberId) {
-    showMessage('answerMessage', 'あなたのアカウントはメンバーに紐付けられていません。', false);
+    showMessage('answerMessage', isAdmin() ? '対象メンバーを選択してください。' : 'あなたのアカウントはメンバーに紐付けられていません。', false);
     return;
   }
   if (isAnswerLocked(answerData.event)) {
@@ -760,7 +794,8 @@ async function submitAnswer() {
   }
 
   const member = publicData.members.find(item => item.memberId === payload.member_id);
-  await appendLog('日程調整回答', answerData.event.eventId, answerData.event.eventName, payload.member_id, member ? member.name : '', previous ? previous.status : '未回答', payload.status, payload.comment || payload.reason_detail);
+  const detail = [payload.comment || payload.reason_detail, proxyLogSuffix(memberId)].filter(Boolean).join(' ');
+  await appendLog('日程調整回答', answerData.event.eventId, answerData.event.eventName, payload.member_id, member ? member.name : '', previous ? previous.status : '未回答', payload.status, detail);
   showMessage('answerMessage', '回答を反映しました。', true);
   flashCompletionOverlay('回答を送信しました');
   await refreshAll();
@@ -769,7 +804,7 @@ async function submitAnswer() {
 
 async function clearAnswer() {
   if (!answerData || !answerData.event) return;
-  const memberId = currentProfile ? currentProfile.member_id : null;
+  const memberId = getEffectiveMemberId();
   if (!memberId) return;
   if (isAnswerLocked(answerData.event)) {
     showMessage('answerMessage', '回答期限を過ぎているため取り消せません。', false);
@@ -794,7 +829,7 @@ async function clearAnswer() {
   }
 
   const member = publicData.members.find(item => item.memberId === memberId);
-  await appendLog('回答取消', answerData.event.eventId, answerData.event.eventName, memberId, member ? member.name : '', previous ? previous.status : '', '未回答', '');
+  await appendLog('回答取消', answerData.event.eventId, answerData.event.eventName, memberId, member ? member.name : '', previous ? previous.status : '', '未回答', proxyLogSuffix(memberId));
   showMessage('answerMessage', '回答を未回答に戻しました。', true);
   await refreshAll();
   await loadAnswerData(currentAnswerToken);
