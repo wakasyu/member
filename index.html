@@ -71,20 +71,17 @@
       </div>
     </header>
 
-    <div id="navSlotDefault">
-      <nav class="tabs">
-        <button class="tab" type="button" data-tab="top" onclick="switchView('top')">トップ</button>
-        <button class="tab" type="button" data-tab="public" onclick="switchView('public')">予定一覧</button>
-        <button class="tab" type="button" data-tab="answer" onclick="switchView('answer')">日程調整回答</button>
-        <button id="adminTabButton" class="tab hidden" type="button" data-tab="admin" onclick="switchView('admin')">管理</button>
-      </nav>
-    </div>
+    <nav class="tabs">
+      <button class="tab" type="button" data-tab="top" onclick="switchView('top')">トップ</button>
+      <button class="tab" type="button" data-tab="public" onclick="switchView('public')">予定一覧</button>
+      <button class="tab" type="button" data-tab="answer" onclick="switchView('answer')">日程調整回答</button>
+      <button id="adminTabButton" class="tab hidden" type="button" data-tab="admin" onclick="switchView('admin')">管理</button>
+    </nav>
 
     <section id="topView" class="view active">
       <div class="top-hero">
         <div id="topHeroMedia" class="top-hero-media" aria-hidden="true"></div>
         <div class="top-hero-scrim" aria-hidden="true"></div>
-        <div id="navSlotHero" class="top-hero-nav"></div>
         <div class="top-hero-title">
           <div class="top-hero-mark">若衆</div>
           <h1>若衆メンバー専用サイト</h1>

@@ -764,7 +764,6 @@ td.wrap {
 
 .top-hero {
   position: relative;
-  height: 66vh;
   min-height: 360px;
   border-radius: 12px;
   overflow: hidden;
@@ -797,32 +796,6 @@ td.wrap {
   position: absolute;
   inset: 0;
   background: rgba(8, 22, 45, .5);
-}
-
-.top-hero-nav {
-  position: relative;
-  z-index: 2;
-}
-
-.top-hero-nav .tabs.tabs-on-hero {
-  background: transparent;
-  border-color: transparent;
-  margin-bottom: 0;
-}
-
-.tabs.tabs-on-hero .tab {
-  color: rgba(255, 255, 255, .82);
-}
-
-.tabs.tabs-on-hero .tab:hover {
-  background: rgba(255, 255, 255, .12);
-  border-color: transparent;
-}
-
-.tabs.tabs-on-hero .tab.active {
-  background: rgba(255, 255, 255, .2);
-  border-color: transparent;
-  color: #fff;
 }
 
 .top-hero-title {
