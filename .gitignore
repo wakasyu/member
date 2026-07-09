@@ -2,3 +2,4 @@ supabase/.temp/
 supabase/.branches/
 .env
 .env.local
+photos/

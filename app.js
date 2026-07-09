@@ -863,6 +863,7 @@ function setupAdminTables() {
   document.getElementById('eventList').addEventListener('click', handlePublicListClick);
   document.getElementById('eventCategoryOptions').addEventListener('click', handleOptionRemoveClick);
   document.getElementById('reasonCategoryOptions').addEventListener('click', handleOptionRemoveClick);
+  document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
 }
 
 function handleAdminEventsClick(domEvent) {
@@ -899,6 +900,7 @@ function renderAdmin() {
   renderAdminMembers();
   renderAdminLogs();
   renderOptionManager();
+  renderTopPhotoManager();
 }
 
 function renderAdminEvents() {
@@ -1184,25 +1186,115 @@ function moveTabsNav(onHero) {
 let topHeroSlides = [];
 let topHeroIndex = 0;
 let topHeroTimer = null;
-const TOP_HERO_PHOTO_COUNT = 12;
+const TOP_PHOTOS_BUCKET = 'top-photos';
+let topPhotoFiles = [];
 
-function initTopHero() {
+async function loadTopPhotoList() {
+  const { data, error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).list('', { sortBy: { column: 'name', order: 'asc' } });
+  topPhotoFiles = error ? [] : (data || []).filter(file => file.name && !file.name.endsWith('/'));
+}
+
+async function initTopHero() {
   const media = document.getElementById('topHeroMedia');
   if (!media || media.dataset.loaded) return;
   media.dataset.loaded = 'true';
-  for (let i = 1; i <= TOP_HERO_PHOTO_COUNT; i++) {
-    const img = new Image();
-    img.onload = () => {
-      const slide = document.createElement('div');
-      slide.className = 'top-hero-slide' + (topHeroSlides.length === 0 ? ' active' : '');
-      slide.style.backgroundImage = `url("photos/${i}.jpg")`;
-      media.appendChild(slide);
-      topHeroSlides.push(slide);
-      renderTopHeroDots();
-      if (topHeroSlides.length === 2 && !topHeroTimer) startTopHeroRotation();
-    };
-    img.src = `photos/${i}.jpg`;
+  await loadTopPhotoList();
+  if (!topPhotoFiles.length) return;
+
+  const paths = topPhotoFiles.map(file => file.name);
+  const { data, error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).createSignedUrls(paths, 3600);
+  if (error || !data) return;
+
+  data.forEach(item => {
+    if (!item.signedUrl) return;
+    const slide = document.createElement('div');
+    slide.className = 'top-hero-slide' + (topHeroSlides.length === 0 ? ' active' : '');
+    slide.style.backgroundImage = `url("${item.signedUrl}")`;
+    media.appendChild(slide);
+    topHeroSlides.push(slide);
+  });
+  renderTopHeroDots();
+  if (topHeroSlides.length >= 2) startTopHeroRotation();
+}
+
+function resetTopHero() {
+  clearInterval(topHeroTimer);
+  topHeroTimer = null;
+  topHeroSlides = [];
+  topHeroIndex = 0;
+  const media = document.getElementById('topHeroMedia');
+  if (media) {
+    media.innerHTML = '';
+    delete media.dataset.loaded;
   }
+  renderTopHeroDots();
+  initTopHero();
+}
+
+async function renderTopPhotoManager() {
+  const list = document.getElementById('topPhotoList');
+  if (!list) return;
+  await loadTopPhotoList();
+  if (!topPhotoFiles.length) {
+    list.innerHTML = '<p class="muted">まだ写真がありません。</p>';
+    return;
+  }
+  const paths = topPhotoFiles.map(file => file.name);
+  const { data } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).createSignedUrls(paths, 600);
+  const urlMap = new Map((data || []).map(item => [item.path, item.signedUrl]));
+  list.innerHTML = topPhotoFiles.map(file => `
+    <div class="photo-card">
+      <img src="${escapeAttr(urlMap.get(file.name) || '')}" alt="${escapeAttr(file.name)}">
+      <button type="button" data-remove-photo="${escapeAttr(file.name)}" title="削除">×</button>
+    </div>
+  `).join('');
+}
+
+async function uploadTopPhotos() {
+  if (!isAdmin()) return;
+  const input = document.getElementById('topPhotoInput');
+  const files = Array.from(input.files || []);
+  if (!files.length) {
+    showMessage('topPhotoMessage', 'ファイルを選択してください。', false);
+    return;
+  }
+
+  const button = document.getElementById('uploadTopPhotoButton');
+  const restore = setButtonBusy(button, 'アップロード中...');
+  const errors = [];
+  for (const file of files) {
+    const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const { error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).upload(safeName, file);
+    if (error) errors.push(error.message);
+  }
+  restore();
+  input.value = '';
+
+  if (errors.length) {
+    showMessage('topPhotoMessage', `一部アップロードに失敗しました：${errors.join(' / ')}`, false);
+  } else {
+    showMessage('topPhotoMessage', '写真をアップロードしました。', true);
+  }
+  await appendLog('トップ写真追加', '', '', '', '', '', '', files.map(file => file.name).join(', '));
+  resetTopHero();
+  await renderTopPhotoManager();
+}
+
+async function removeTopPhoto(name) {
+  if (!isAdmin() || !confirm('この写真を削除しますか？')) return;
+  const { error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).remove([name]);
+  if (error) {
+    showMessage('topPhotoMessage', error.message, false);
+    return;
+  }
+  await appendLog('トップ写真削除', '', '', '', '', '', '', name);
+  resetTopHero();
+  await renderTopPhotoManager();
+}
+
+function handleTopPhotoClick(domEvent) {
+  const removeButton = domEvent.target.closest('[data-remove-photo]');
+  if (removeButton) removeTopPhoto(removeButton.dataset.removePhoto);
 }
 
 function renderTopHeroDots() {

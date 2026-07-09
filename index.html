@@ -186,6 +186,7 @@
         <button class="subtab" type="button" data-admin-tab="memberList" onclick="switchAdminTab('memberList')">メンバー一覧</button>
         <button class="subtab" type="button" data-admin-tab="logs" onclick="switchAdminTab('logs')">ログ</button>
         <button class="subtab" type="button" data-admin-tab="options" onclick="switchAdminTab('options')">分類管理</button>
+        <button class="subtab" type="button" data-admin-tab="photos" onclick="switchAdminTab('photos')">トップ写真</button>
       </nav>
 
       <section class="panel admin-section active" data-admin-section="eventForm">
@@ -270,6 +271,17 @@
           <button type="button" onclick="addOption('reason_category', 'newReasonCategoryInput')">追加</button>
         </div>
         <div id="optionMessage" class="message"></div>
+      </section>
+
+      <section class="panel admin-section" data-admin-section="photos">
+        <h2>トップページの写真管理</h2>
+        <p class="muted">ここでアップロードした写真は、ログインしたメンバーだけが見られる形で保存され、トップページのスライドショーに反映されます。</p>
+        <div id="topPhotoList" class="photo-grid"></div>
+        <div class="option-add">
+          <input id="topPhotoInput" type="file" accept="image/*" multiple>
+          <button id="uploadTopPhotoButton" type="button" onclick="uploadTopPhotos()">アップロード</button>
+        </div>
+        <div id="topPhotoMessage" class="message"></div>
       </section>
     </section>
   </div>

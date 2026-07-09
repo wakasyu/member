@@ -718,6 +718,50 @@ td.wrap {
   flex: 1;
 }
 
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.photo-card {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.photo-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-card button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .55);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 900;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+
+.photo-card button:hover {
+  background: rgba(0, 0, 0, .75);
+}
+
 .top-hero {
   position: relative;
   min-height: 360px;

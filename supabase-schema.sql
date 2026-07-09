@@ -426,6 +426,37 @@ to authenticated
 using (public.is_admin())
 with check (public.is_admin());
 
+-- トップページのスライドショー写真置き場。ログインしていない人には一切見せない
+-- （publicなbucketにしない = 直リンクでも見えないようにする）。
+insert into storage.buckets (id, name, public)
+values ('top-photos', 'top-photos', false)
+on conflict (id) do nothing;
+
+drop policy if exists "top-photos read authenticated" on storage.objects;
+create policy "top-photos read authenticated"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'top-photos');
+
+drop policy if exists "top-photos insert admin" on storage.objects;
+create policy "top-photos insert admin"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'top-photos' and public.is_admin());
+
+drop policy if exists "top-photos update admin" on storage.objects;
+create policy "top-photos update admin"
+on storage.objects for update
+to authenticated
+using (bucket_id = 'top-photos' and public.is_admin())
+with check (bucket_id = 'top-photos' and public.is_admin());
+
+drop policy if exists "top-photos delete admin" on storage.objects;
+create policy "top-photos delete admin"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'top-photos' and public.is_admin());
+
 -- リアルタイム反映（他の人の操作を自動的に画面へ反映する）のためのpublication登録
 do $$
 begin
