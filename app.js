@@ -118,6 +118,8 @@ async function enterApp(user) {
   document.getElementById('appShell').classList.remove('hidden');
   document.getElementById('userMeta').textContent = `${currentProfile.display_name || user.email} / ${isAdmin() ? '管理者' : 'メンバー'}`;
   document.getElementById('adminTabButton').classList.toggle('hidden', !isAdmin());
+  switchView('top');
+  initTopHero();
   await loadOptions();
   setupAdminForms();
   setupAdminTables();
@@ -263,6 +265,7 @@ async function loadPublicData() {
   setupPublicFilters();
   renderPublic();
   populateAnswerEventSelect();
+  renderTopHighlights();
   if (isAdmin()) renderAdmin();
 }
 
@@ -1166,6 +1169,86 @@ function switchView(name) {
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
   document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
   document.getElementById(`${name}View`).classList.add('active');
+  moveTabsNav(name === 'top');
+}
+
+function moveTabsNav(onHero) {
+  const nav = document.querySelector('.tabs');
+  const heroSlot = document.getElementById('navSlotHero');
+  const defaultSlot = document.getElementById('navSlotDefault');
+  if (!nav || !heroSlot || !defaultSlot) return;
+  nav.classList.toggle('tabs-on-hero', onHero);
+  (onHero ? heroSlot : defaultSlot).appendChild(nav);
+}
+
+let topHeroSlides = [];
+let topHeroIndex = 0;
+let topHeroTimer = null;
+const TOP_HERO_PHOTO_COUNT = 12;
+
+function initTopHero() {
+  const media = document.getElementById('topHeroMedia');
+  if (!media || media.dataset.loaded) return;
+  media.dataset.loaded = 'true';
+  for (let i = 1; i <= TOP_HERO_PHOTO_COUNT; i++) {
+    const img = new Image();
+    img.onload = () => {
+      const slide = document.createElement('div');
+      slide.className = 'top-hero-slide' + (topHeroSlides.length === 0 ? ' active' : '');
+      slide.style.backgroundImage = `url("photos/${i}.jpg")`;
+      media.appendChild(slide);
+      topHeroSlides.push(slide);
+      renderTopHeroDots();
+      if (topHeroSlides.length === 2 && !topHeroTimer) startTopHeroRotation();
+    };
+    img.src = `photos/${i}.jpg`;
+  }
+}
+
+function renderTopHeroDots() {
+  const dots = document.getElementById('topHeroDots');
+  if (!dots) return;
+  dots.innerHTML = topHeroSlides.map((slide, i) => `<span class="${i === topHeroIndex ? 'active' : ''}"></span>`).join('');
+}
+
+function startTopHeroRotation() {
+  const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReducedMotion) return;
+  clearInterval(topHeroTimer);
+  topHeroTimer = setInterval(() => {
+    if (topHeroSlides.length < 2) return;
+    topHeroSlides[topHeroIndex].classList.remove('active');
+    topHeroIndex = (topHeroIndex + 1) % topHeroSlides.length;
+    topHeroSlides[topHeroIndex].classList.add('active');
+    renderTopHeroDots();
+  }, 5000);
+}
+
+function renderTopHighlights() {
+  const nextBox = document.getElementById('topNextEvent');
+  const pendingBox = document.getElementById('topPendingAnswers');
+  if (!nextBox || !pendingBox) return;
+
+  const upcoming = publicData.events
+    .filter(event => event.publicState !== '削除' && !isPastEvent(event))
+    .sort(compareEvents);
+  const next = upcoming[0];
+  nextBox.innerHTML = next
+    ? `<p class="muted" style="margin:0 0 4px;font-size:12px;">次の予定</p><p style="margin:0 0 4px;font-size:15px;font-weight:900;">${escapeHtml(next.eventName)}</p><p class="muted" style="margin:0;font-size:13px;">${escapeHtml(formatDate(next.date))}${next.startTime ? escapeHtml(' ' + next.startTime + '〜') : ''}</p>`
+    : `<p class="muted" style="margin:0 0 4px;font-size:12px;">次の予定</p><p style="margin:0;font-size:14px;">予定はまだありません</p>`;
+
+  const memberId = currentProfile ? currentProfile.member_id : null;
+  if (memberId) {
+    const pendingCount = upcoming.filter(event => {
+      const answer = findAnswerForMember(event, memberId);
+      return answer && answer.status === '未回答';
+    }).length;
+    pendingBox.innerHTML = pendingCount
+      ? `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0 0 4px;font-size:15px;font-weight:900;">未回答が${pendingCount}件あります</p><span class="badge pending">要回答</span>`
+      : `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0;font-size:14px;">未回答はありません</p>`;
+  } else {
+    pendingBox.innerHTML = `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0;font-size:13px;">アカウントがメンバーに紐付けられていません</p>`;
+  }
 }
 
 function switchAdminTab(name) {

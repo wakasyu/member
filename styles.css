@@ -718,6 +718,138 @@ td.wrap {
   flex: 1;
 }
 
+.top-hero {
+  position: relative;
+  min-height: 360px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+  background: var(--main-2);
+  color: #fff;
+}
+
+.top-hero-media {
+  position: absolute;
+  inset: 0;
+}
+
+.top-hero-slide {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transition: opacity 1.4s ease;
+}
+
+.top-hero-slide.active {
+  opacity: 1;
+}
+
+.top-hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 22, 45, .5);
+}
+
+.top-hero-nav {
+  position: relative;
+  z-index: 2;
+}
+
+.top-hero-nav .tabs.tabs-on-hero {
+  background: transparent;
+  border-color: transparent;
+  margin-bottom: 0;
+}
+
+.tabs.tabs-on-hero .tab {
+  color: rgba(255, 255, 255, .82);
+}
+
+.tabs.tabs-on-hero .tab:hover {
+  background: rgba(255, 255, 255, .12);
+  border-color: transparent;
+}
+
+.tabs.tabs-on-hero .tab.active {
+  background: rgba(255, 255, 255, .2);
+  border-color: transparent;
+  color: #fff;
+}
+
+.top-hero-title {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 24px;
+}
+
+.top-hero-mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, .16);
+  color: #fff;
+  font-weight: 900;
+}
+
+.top-hero-title h1 {
+  color: #fff;
+  font-size: 26px;
+  margin: 4px 0 0;
+}
+
+.top-hero-title p {
+  color: rgba(255, 255, 255, .85);
+  margin: 0;
+  font-size: 14px;
+}
+
+.top-hero-dots {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+}
+
+.top-hero-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .4);
+}
+
+.top-hero-dots span.active {
+  background: #fff;
+}
+
+.top-highlights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.highlight-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
 .completion-overlay {
   position: fixed;
   inset: 0;
@@ -776,6 +908,10 @@ td.wrap {
   .summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .top-hero {
+    min-height: 280px;
+  }
 }
 
 @media (max-width: 600px) {
@@ -784,7 +920,8 @@ td.wrap {
   .grid4,
   .members,
   .summary,
-  .member-board {
+  .member-board,
+  .top-highlights {
     grid-template-columns: 1fr;
   }
 }

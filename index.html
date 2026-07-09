@@ -71,13 +71,34 @@
       </div>
     </header>
 
-    <nav class="tabs">
-      <button class="tab active" type="button" data-tab="public" onclick="switchView('public')">予定一覧</button>
-      <button class="tab" type="button" data-tab="answer" onclick="switchView('answer')">日程調整回答</button>
-      <button id="adminTabButton" class="tab hidden" type="button" data-tab="admin" onclick="switchView('admin')">管理</button>
-    </nav>
+    <div id="navSlotDefault">
+      <nav class="tabs">
+        <button class="tab" type="button" data-tab="top" onclick="switchView('top')">トップ</button>
+        <button class="tab" type="button" data-tab="public" onclick="switchView('public')">予定一覧</button>
+        <button class="tab" type="button" data-tab="answer" onclick="switchView('answer')">日程調整回答</button>
+        <button id="adminTabButton" class="tab hidden" type="button" data-tab="admin" onclick="switchView('admin')">管理</button>
+      </nav>
+    </div>
 
-    <section id="publicView" class="view active">
+    <section id="topView" class="view active">
+      <div class="top-hero">
+        <div id="topHeroMedia" class="top-hero-media" aria-hidden="true"></div>
+        <div class="top-hero-scrim" aria-hidden="true"></div>
+        <div id="navSlotHero" class="top-hero-nav"></div>
+        <div class="top-hero-title">
+          <div class="top-hero-mark">若衆</div>
+          <h1>若衆メンバー専用サイト</h1>
+          <p>練習・演奏の記録とともに</p>
+        </div>
+        <div id="topHeroDots" class="top-hero-dots"></div>
+      </div>
+      <div class="top-highlights">
+        <div id="topNextEvent" class="highlight-card"></div>
+        <div id="topPendingAnswers" class="highlight-card"></div>
+      </div>
+    </section>
+
+    <section id="publicView" class="view">
       <section class="toolbar">
         <select id="viewMode" onchange="renderPublic()">
           <option value="event">予定主体で見る</option>
