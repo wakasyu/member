@@ -62,8 +62,11 @@
   「参加可能人数が多い日トップ3」を自動提案する。備考欄（1人1件、
   `availability_notes`）、管理者による代理入力（メンバー選択式）、
   自分の入力をリセットするボタンにも対応
-- メンバー追加・編集フォームから直接、招待リンクの発行/コピーができる
-  （以前はメンバー一覧側にあったが、追加した流れで発行できるよう移動した）
+- メンバー追加画面に「新規メンバー登録リンクを発行」ボタンがある。
+  事前に名前などを入力しておく必要は無く、発行したリンクを開いた人が
+  自分で名前・連絡先・メールアドレスを入力するとmembersテーブルの行
+  そのものが新規作成される（`member_invites`テーブルでトークン管理。
+  以前の「既存メンバー行にトークンを付与する」設計から作り直した）
 
 ## データベース・インフラの状態
 
@@ -121,12 +124,13 @@
 - ロゴの円形表示が意図通り見えているか未確認（このプレビュー環境の
   スクリーンショット機能がタイムアウトし、目視確認ができなかった）
 - 最新の`supabase-schema.sql`（list_options等のauthenticated/anon GRANT追加、
-  `members.registration_token`/`registered_at`列、`availability_polls`/
-  `availability_slots`/`availability_notes`テーブル）がSupabase側で
-  まだ実行されていない可能性が高い。実行しないと分類管理・メンバー登録・
-  候補日程調整がすべてエラーになる（`register-member`のデプロイは完了済み）
-- 新しいEdge Function `register-member` はまだ未デプロイ
-  （`supabase functions deploy register-member --no-verify-jwt` が必要）
+  `availability_polls`/`availability_slots`/`availability_notes`/
+  `member_invites`テーブル、`members.registration_token`/`registered_at`列の削除）
+  がSupabase側でまだ実行されていない可能性が高い。実行しないと分類管理・
+  メンバー登録・候補日程調整がすべてエラーになる
+- `register-member`のEdge Functionを、メンバー登録の設計変更に合わせて
+  作り直した（`member_invites`テーブルを使う版）。**再デプロイが必要**：
+  `supabase functions deploy register-member --no-verify-jwt`
 - メンバー自己登録の初期パスワードは全員共通で固定文字列「password」。
   本人がログイン後すぐに変更する前提の運用のため、招待リンクの管理
   （誰にいつ送ったか）は引き続き重要
