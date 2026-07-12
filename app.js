@@ -56,6 +56,7 @@ async function initializeApp() {
   document.getElementById('loginForm').addEventListener('submit', handleLogin);
   document.getElementById('forgotPasswordButton').addEventListener('click', requestPasswordReset);
   document.getElementById('passwordResetForm').addEventListener('submit', submitNewPassword);
+  document.getElementById('registerForm').addEventListener('submit', submitRegisterForm);
 
   // Supabaseのメールリンクの形式（#access_token=...&type=recovery か ?code=...）に
   // 依存せず確実に拾えるよう、URLの文字列チェックに加えてSDK側のイベントでも検知する。
@@ -67,6 +68,11 @@ async function initializeApp() {
 
   const params = new URLSearchParams(window.location.search);
   currentAnswerToken = params.get('schedule') || params.get('answer') || '';
+
+  if (params.get('register')) {
+    await showRegisterScreen(params.get('register'));
+    return;
+  }
 
   if (window.location.hash.includes('type=recovery') || params.get('type') === 'recovery' || params.has('code')) {
     showPasswordResetScreen();
@@ -116,6 +122,73 @@ function showPasswordResetScreen() {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('appShell').classList.add('hidden');
   document.getElementById('passwordResetScreen').classList.remove('hidden');
+}
+
+let currentRegisterToken = '';
+
+async function callEdgeFunction(name, options) {
+  const config = window.WAKASHU_CONFIG || {};
+  const url = `${config.supabaseUrl}/functions/v1/${name}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: config.supabaseAnonKey,
+      Authorization: `Bearer ${config.supabaseAnonKey}`,
+      ...(options && options.headers)
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `通信エラー（${response.status}）`);
+  return data;
+}
+
+async function showRegisterScreen(token) {
+  currentRegisterToken = token;
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('appShell').classList.add('hidden');
+  document.getElementById('registerScreen').classList.remove('hidden');
+  try {
+    const data = await callEdgeFunction(`register-member?token=${encodeURIComponent(token)}`, { method: 'GET' });
+    document.getElementById('registerName').value = data.name || '';
+    document.getElementById('registerIntro').textContent = data.name ? `${data.name}さん、ようこそ！以下の情報を入力して登録してください。` : '以下の情報を入力して登録してください。';
+  } catch (error) {
+    document.getElementById('registerForm').classList.add('hidden');
+    showMessage('registerMessage', error.message, false);
+  }
+}
+
+async function submitRegisterForm(event) {
+  event.preventDefault();
+  const phone = document.getElementById('registerContact').value.trim();
+  if (phone && !/^[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4}$/.test(phone)) {
+    showMessage('registerMessage', '電話番号は「090-1234-5678」のようにハイフン区切りで入力してください。', false);
+    return;
+  }
+
+  const button = document.getElementById('submitRegisterButton');
+  const restore = setButtonBusy(button, '登録中...');
+  try {
+    await callEdgeFunction('register-member', {
+      method: 'POST',
+      body: JSON.stringify({
+        token: currentRegisterToken,
+        email: document.getElementById('registerEmail').value.trim(),
+        name: document.getElementById('registerName').value.trim(),
+        shortName: document.getElementById('registerShortName').value.trim(),
+        contact: phone,
+        birthDate: document.getElementById('registerBirthDate').value || null,
+        costumeSize: document.getElementById('registerCostumeSize').value.trim(),
+        tshirtSize: document.getElementById('registerTshirtSize').value.trim()
+      })
+    });
+    document.getElementById('registerForm').classList.add('hidden');
+    showMessage('registerMessage', '登録が完了しました。メールアドレスとパスワード「password」でログインし、ログイン後は必ずパスワードを変更してください。', true);
+  } catch (error) {
+    showMessage('registerMessage', error.message, false);
+  } finally {
+    restore();
+  }
 }
 
 async function submitNewPassword(event) {
@@ -957,10 +1030,12 @@ function handleAdminMembersClick(domEvent) {
   const deleteButton = domEvent.target.closest('[data-delete-member]');
   const upButton = domEvent.target.closest('[data-move-member-up]');
   const downButton = domEvent.target.closest('[data-move-member-down]');
+  const inviteButton = domEvent.target.closest('[data-invite-member]');
   if (editButton) editMember(editButton.dataset.editMember);
   else if (deleteButton) deleteMember(deleteButton.dataset.deleteMember);
   else if (upButton) moveMember(upButton.dataset.moveMemberUp, 'up');
   else if (downButton) moveMember(downButton.dataset.moveMemberDown, 'down');
+  else if (inviteButton) issueInviteLink(inviteButton.dataset.inviteMember, inviteButton);
 }
 
 function handlePublicListClick(domEvent) {
@@ -1028,6 +1103,9 @@ function renderAdminMembers() {
       <td data-label="Tシャツ">${escapeHtml(member.tshirtSize || '')}</td>
       <td class="wrap" data-label="備考">${escapeHtml(member.note || '')}</td>
     ` : '';
+    const accountCell = member.registeredAt
+      ? '登録済み'
+      : `<button type="button" data-invite-member="${escapeAttr(member.memberId)}">招待リンク${member.registrationToken ? 'をコピー' : 'を発行'}</button>`;
     return `
     <tr>
       <td data-label="順"><div class="order-buttons">
@@ -1041,13 +1119,46 @@ function renderAdminMembers() {
       <td class="wrap" data-label="電話番号">${escapeHtml(member.contact || '')}</td>
       <td data-label="担当">${escapeHtml(member.duty || '')}</td>
       ${detailCells}
+      <td data-label="アカウント">${accountCell}</td>
       <td data-label="操作"><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button> <button type="button" class="danger" data-delete-member="${escapeAttr(member.memberId)}">削除</button></td>
     </tr>
   `;
   }).join('');
   const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>衣装</th><th>Tシャツ</th><th>備考</th>' : '';
-  const colCount = showAll ? 15 : 8;
-  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
+  const colCount = (showAll ? 15 : 8) + 1;
+  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>アカウント</th><th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
+}
+
+function generateInviteToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(18));
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function createRegisterUrl(token) {
+  const base = String(window.location.href || '').split('?')[0].split('#')[0];
+  return `${base}?register=${encodeURIComponent(token)}`;
+}
+
+async function issueInviteLink(memberId, buttonEl) {
+  if (!isAdmin()) return;
+  const member = publicData.members.find(item => item.memberId === memberId);
+  if (!member) return;
+  let token = member.registrationToken;
+  if (!token) {
+    token = generateInviteToken();
+    const { error } = await supabaseClient.from('members').update({ registration_token: token }).eq('id', memberId);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    await refreshAll();
+  }
+  const url = createRegisterUrl(token);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => flashButtonText(buttonEl, 'コピーしました')).catch(() => showSharePrompt(url));
+  } else {
+    showSharePrompt(url);
+  }
 }
 
 async function deleteMember(memberId) {
@@ -1650,6 +1761,8 @@ function normalizeMember(row) {
     tshirtSize: row.tshirt_size || '',
     duty: row.duty || '',
     sortOrder: Number.isFinite(row.sort_order) ? row.sort_order : 0,
+    registrationToken: row.registration_token || '',
+    registeredAt: row.registered_at || '',
     visible: row.visible !== false,
     createdAt: row.created_at || '',
     updatedAt: row.updated_at || ''

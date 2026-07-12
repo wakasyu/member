@@ -139,6 +139,14 @@ alter table public.members add column if not exists duty text not null default '
 -- 予定一覧などでの表示順。管理画面のメンバー一覧から並び替えられるようにする
 alter table public.members add column if not exists sort_order integer not null default 0;
 
+-- メンバー自己登録（招待リンク）用。管理者が発行したトークンをURLに含め、
+-- ログイン不要で本人が自分の情報を入力し、アカウント作成まで完了できるようにする。
+-- 実際のアカウント作成・書き込みはEdge Function（register-member、service_role）で行う。
+alter table public.members add column if not exists registration_token text null;
+alter table public.members add column if not exists registered_at timestamptz null;
+create unique index if not exists members_registration_token_unique_idx
+  on public.members (registration_token) where registration_token is not null;
+
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
   name text not null,

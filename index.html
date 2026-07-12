@@ -55,6 +55,47 @@
     </section>
   </div>
 
+  <div id="registerScreen" class="login-screen hidden">
+    <section class="login-card">
+      <div class="brand-mark"><img src="./logo.jpg" alt="若衆の絆" onerror="this.remove()"><span>若衆</span></div>
+      <h1>メンバー登録</h1>
+      <p id="registerIntro" class="muted"></p>
+      <p class="notice">登録すると、入力したメールアドレスとパスワード「<strong>password</strong>」でログインできるようになります。ログイン後は必ずパスワードを変更してください。</p>
+      <form id="registerForm" class="form-stack">
+        <label>
+          メールアドレス
+          <input id="registerEmail" type="email" autocomplete="username" required>
+        </label>
+        <label>
+          氏名（フルネーム）
+          <input id="registerName" type="text" required>
+        </label>
+        <label>
+          表示名（苗字など・空欄なら氏名を使用）
+          <input id="registerShortName" type="text" placeholder="例：山田">
+        </label>
+        <label>
+          電話番号
+          <input id="registerContact" type="tel" placeholder="090-1234-5678">
+        </label>
+        <label>
+          生年月日
+          <input id="registerBirthDate" type="date">
+        </label>
+        <label>
+          衣装サイズ
+          <input id="registerCostumeSize" type="text">
+        </label>
+        <label>
+          Tシャツサイズ
+          <input id="registerTshirtSize" type="text">
+        </label>
+        <button id="submitRegisterButton" class="primary" type="submit">登録する</button>
+      </form>
+      <div id="registerMessage" class="message"></div>
+    </section>
+  </div>
+
   <div id="appShell" class="shell hidden">
     <div id="topPhotoBackdrop" class="top-photo-backdrop hidden" aria-hidden="true">
       <div id="topHeroMedia" class="top-hero-media"></div>
