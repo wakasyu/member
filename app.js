@@ -464,21 +464,23 @@ function createEventRowHtml(event) {
 
   return `
     <article class="event-row">
-      <div class="event-row-head">
-        <span class="cat">${escapeHtml(event.category || 'その他')}</span>
-        <span class="event-title">${escapeHtml(event.eventName)}</span>
+      <div class="event-row-top">
+        <div class="event-row-summary">
+          <div class="event-row-head">
+            <span class="cat">${escapeHtml(event.category || 'その他')}</span>
+            <span class="event-title">${escapeHtml(event.eventName)}</span>
+          </div>
+          <div class="event-meta-line">${metaParts.join('')}</div>
+          ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
+        </div>
+        <div class="share-actions">
+          <button type="button" data-open-answer="${escapeAttr(event.answerToken)}">日程調整リンク</button>
+          <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
+        </div>
       </div>
-      <div class="event-meta-line">${metaParts.join('')}</div>
-      ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
       <div class="event-row-body">
         <div class="members">${answerHtml || '<div class="muted">回答対象メンバーがいません。</div>'}</div>
-        <div class="event-row-actions">
-          <div class="counts-inline">${countsHtml}</div>
-          <div class="share-actions">
-            <button type="button" data-open-answer="${escapeAttr(event.answerToken)}">日程調整リンク</button>
-            <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
-          </div>
-        </div>
+        <div class="counts-inline">${countsHtml}</div>
       </div>
     </article>
   `;

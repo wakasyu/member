@@ -500,6 +500,27 @@ textarea {
   background: var(--surface-2);
 }
 
+.event-row-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px 16px;
+}
+
+.event-row-summary {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.event-row-top .share-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .event-row-head {
   display: flex;
   flex-wrap: wrap;
@@ -540,18 +561,13 @@ textarea {
   flex: 1 1 320px;
 }
 
-.event-row-actions {
+.counts-inline {
   flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 160px;
-}
-
-.counts-inline {
-  display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 6px;
+  max-width: 220px;
 }
 
 .day-group {
