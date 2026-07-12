@@ -438,8 +438,16 @@ function isSameDay(a, b) {
 }
 
 function createEventRowHtml(event) {
-  const timeText = [event.startTime, event.endTime].filter(Boolean).join(' - ') || '-';
-  const placeHtml = event.placeUrl ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所リンク')}</a>` : escapeHtml(event.place || '-');
+  const timeText = [event.startTime, event.endTime].filter(Boolean).join(' - ');
+  const placeHtml = event.placeUrl ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所リンク')}</a>` : escapeHtml(event.place || '');
+  const deadlineText = formatDate(event.answerDeadline);
+
+  const metaParts = [`<span>${escapeHtml(formatDate(event.date) || '日付未定')}</span>`];
+  if (timeText) metaParts.push(`<span>${escapeHtml(timeText)}</span>`);
+  if (event.place || event.placeUrl) metaParts.push(`<span>${placeHtml}</span>`);
+  if (deadlineText) metaParts.push(`<span>期限 ${escapeHtml(deadlineText)}</span>`);
+  if (event.creator) metaParts.push(`<span>作成 ${escapeHtml(event.creator)}</span>`);
+
   const answerHtml = (event.answers || []).map(answer => `
     <div class="member-chip">
       <div class="member-head">
@@ -452,26 +460,24 @@ function createEventRowHtml(event) {
     </div>
   `).join('');
 
+  const countsHtml = STATUS_LIST.map(status => `<span class="badge ${statusClass(status)}">${escapeHtml(status)} ${Number(event.counts && event.counts[status] || 0)}</span>`).join('');
+
   return `
     <article class="event-row">
-      <div class="event-main">
+      <div class="event-row-head">
         <span class="cat">${escapeHtml(event.category || 'その他')}</span>
-        <div class="event-title">${escapeHtml(event.eventName)}</div>
-        <div class="meta">
-          <div class="meta-label">日付</div><div>${escapeHtml(formatDate(event.date) || '-')}</div>
-          <div class="meta-label">時間</div><div>${escapeHtml(timeText)}</div>
-          <div class="meta-label">場所</div><div>${placeHtml}</div>
-          <div class="meta-label">期限</div><div>${escapeHtml(formatDate(event.answerDeadline) || '-')}</div>
-          <div class="meta-label">作成者</div><div>${escapeHtml(event.creator || '-')}</div>
-          <div class="meta-label">備考</div><div>${escapeHtml(event.note || '-')}</div>
-        </div>
+        <span class="event-title">${escapeHtml(event.eventName)}</span>
       </div>
-      <div class="members">${answerHtml || '<div class="muted">回答対象メンバーがいません。</div>'}</div>
-      <div class="counts">
-        ${STATUS_LIST.map(status => `<div class="count"><span>${status}</span><span>${Number(event.counts && event.counts[status] || 0)}</span></div>`).join('')}
-        <div class="share-actions">
-          <button type="button" data-open-answer="${escapeAttr(event.answerToken)}">日程調整リンク</button>
-          <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
+      <div class="event-meta-line">${metaParts.join('')}</div>
+      ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
+      <div class="event-row-body">
+        <div class="members">${answerHtml || '<div class="muted">回答対象メンバーがいません。</div>'}</div>
+        <div class="event-row-actions">
+          <div class="counts-inline">${countsHtml}</div>
+          <div class="share-actions">
+            <button type="button" data-open-answer="${escapeAttr(event.answerToken)}">日程調整リンク</button>
+            <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
+          </div>
         </div>
       </div>
     </article>
