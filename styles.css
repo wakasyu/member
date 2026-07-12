@@ -234,6 +234,27 @@ textarea {
   gap: 16px;
   align-items: flex-start;
   margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 3px solid var(--main-light);
+}
+
+.site-header-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.site-mark {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--main);
+  color: #fff;
+  font-weight: 900;
+  font-size: 13px;
 }
 
 .eyebrow {
