@@ -1,18 +1,20 @@
 // Supabase Edge Function: register-member
 //
 // 管理者が発行した招待リンク（?register=トークン）から、ログイン不要で
-// 新メンバー本人がメールアドレスと基本情報を入力し、アカウント作成まで
-// 完了できるようにするための公開エンドポイント。
+// 新しい人が自分の名前・連絡先・メールアドレスを入力するだけで、
+// メンバー登録とアカウント作成まで完了できるようにするための公開エンドポイント。
+// 事前に管理者がメンバー行を作っておく必要はなく、この関数が
+// membersテーブルの行そのものを新規作成する。
 // service_role権限が必要な auth.admin.createUser をクライアントから
 // 直接呼ばせるわけにはいかないため、その処理をここに閉じ込める。
 //
 // 認証はJWTではなく、トークン自体（推測不可能な長いランダム文字列で
-// 1回だけ有効）で行う。招待されていない相手はmembersテーブルの
-// registration_tokenが一致しないため何もできない。
+// 1回だけ有効）で行う。招待されていない相手はmember_invitesテーブルの
+// tokenが一致しないため何もできない。
 //
-// GET  ?token=xxx  … 招待の有効性確認＋氏名のプレフィル用
+// GET  ?token=xxx  … 招待の有効性確認用
 // POST { token, email, name, shortName, contact, birthDate, costumeSize, tshirtSize }
-//      … アカウント作成＋メンバー情報反映
+//      … メンバー行の新規作成＋アカウント作成
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -46,15 +48,15 @@ Deno.serve(async (req) => {
     const token = (url.searchParams.get("token") || "").trim();
     if (!token) return jsonResponse({ error: "招待リンクが正しくありません。" }, 400);
 
-    const { data: member } = await supabase
-      .from("members")
-      .select("name, registered_at")
-      .eq("registration_token", token)
+    const { data: invite } = await supabase
+      .from("member_invites")
+      .select("used_at")
+      .eq("token", token)
       .maybeSingle();
 
-    if (!member) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
-    if (member.registered_at) return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
-    return jsonResponse({ name: member.name || "" });
+    if (!invite) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
+    if (invite.used_at) return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
+    return jsonResponse({ ok: true });
   }
 
   if (req.method !== "POST") {
@@ -64,27 +66,46 @@ Deno.serve(async (req) => {
   const payload = await req.json().catch(() => null);
   const token = String(payload?.token || "").trim();
   const email = String(payload?.email || "").trim().toLowerCase();
+  const name = String(payload?.name || "").trim();
 
   if (!token) return jsonResponse({ error: "招待リンクが正しくありません。" }, 400);
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return jsonResponse({ error: "メールアドレスを正しく入力してください。" }, 400);
   }
-
-  const { data: member } = await supabase
-    .from("members")
-    .select("*")
-    .eq("registration_token", token)
-    .maybeSingle();
-
-  if (!member) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
-  if (member.registered_at) return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
-
-  const name = String(payload?.name || member.name || "").trim();
   if (!name) return jsonResponse({ error: "氏名を入力してください。" }, 400);
 
   const contact = payload?.contact != null ? String(payload.contact).trim() : "";
   if (contact && !/^[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4}$/.test(contact)) {
     return jsonResponse({ error: "電話番号は「090-1234-5678」のようにハイフン区切りで入力してください。" }, 400);
+  }
+
+  const { data: invite } = await supabase
+    .from("member_invites")
+    .select("*")
+    .eq("token", token)
+    .maybeSingle();
+
+  if (!invite) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
+  if (invite.used_at) return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
+
+  const { data: member, error: memberError } = await supabase
+    .from("members")
+    .insert({
+      name,
+      short_name: payload?.shortName != null ? String(payload.shortName).trim() : "",
+      contact,
+      birth_date: payload?.birthDate || null,
+      costume_size: payload?.costumeSize != null ? String(payload.costumeSize).trim() : "",
+      tshirt_size: payload?.tshirtSize != null ? String(payload.tshirtSize).trim() : "",
+    })
+    .select()
+    .single();
+
+  if (memberError || !member) {
+    const message = (memberError?.message || "").toLowerCase().includes("duplicate")
+      ? "同じ名前のメンバーが既に登録されています。管理者に確認してください。"
+      : `メンバー登録に失敗しました：${memberError?.message || "unknown error"}`;
+    return jsonResponse({ error: message }, 400);
   }
 
   const { data: created, error: createError } = await supabase.auth.admin.createUser({
@@ -94,6 +115,8 @@ Deno.serve(async (req) => {
   });
 
   if (createError || !created?.user) {
+    // アカウント作成に失敗した場合、作りかけのメンバー行を残さない
+    await supabase.from("members").delete().eq("id", member.id);
     const message = (createError?.message || "").toLowerCase().includes("already")
       ? "このメールアドレスはすでに登録されています。"
       : `アカウント作成に失敗しました：${createError?.message || "unknown error"}`;
@@ -112,17 +135,9 @@ Deno.serve(async (req) => {
   }
 
   await supabase
-    .from("members")
-    .update({
-      name,
-      short_name: payload?.shortName != null ? String(payload.shortName).trim() : member.short_name,
-      contact,
-      birth_date: payload?.birthDate || member.birth_date,
-      costume_size: payload?.costumeSize != null ? String(payload.costumeSize).trim() : member.costume_size,
-      tshirt_size: payload?.tshirtSize != null ? String(payload.tshirtSize).trim() : member.tshirt_size,
-      registered_at: new Date().toISOString(),
-    })
-    .eq("id", member.id);
+    .from("member_invites")
+    .update({ used_at: new Date().toISOString(), created_member_id: member.id })
+    .eq("id", invite.id);
 
   await supabase.from("logs").insert({
     action: "メンバー本人登録",

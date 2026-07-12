@@ -139,13 +139,12 @@ alter table public.members add column if not exists duty text not null default '
 -- 予定一覧などでの表示順。管理画面のメンバー一覧から並び替えられるようにする
 alter table public.members add column if not exists sort_order integer not null default 0;
 
--- メンバー自己登録（招待リンク）用。管理者が発行したトークンをURLに含め、
--- ログイン不要で本人が自分の情報を入力し、アカウント作成まで完了できるようにする。
--- 実際のアカウント作成・書き込みはEdge Function（register-member、service_role）で行う。
-alter table public.members add column if not exists registration_token text null;
-alter table public.members add column if not exists registered_at timestamptz null;
-create unique index if not exists members_registration_token_unique_idx
-  on public.members (registration_token) where registration_token is not null;
+-- メンバー自己登録は「既存メンバー行に招待トークンを付与する」方式ではなく、
+-- 招待トークン自体を管理する専用テーブル（member_invites）に置き換えたため、
+-- この方式で使っていた列は使用しない。
+drop index if exists members_registration_token_unique_idx;
+alter table public.members drop column if exists registration_token;
+alter table public.members drop column if exists registered_at;
 
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
@@ -278,6 +277,20 @@ create table if not exists public.availability_notes (
   updated_at timestamptz not null default now(),
   unique (poll_id, member_id)
 );
+
+-- 新規メンバー登録リンク用のトークン。既存メンバー行とは紐づかない
+-- （事前に名前などを入力しておく必要はなく、登録フォーム側の入力内容から
+-- membersテーブルの行そのものをEdge Function（service_role）が新規作成する）。
+create table if not exists public.member_invites (
+  id uuid primary key default gen_random_uuid(),
+  token text not null unique,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  used_at timestamptz null,
+  created_member_id uuid references public.members(id) on delete set null
+);
+
+grant select, insert, update, delete on public.member_invites to authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.members enable row level security;
@@ -544,6 +557,18 @@ with check (
   public.is_admin()
   or member_id = (select member_id from public.profiles where id = auth.uid())
 );
+
+-- 招待トークンの発行・一覧確認は管理者のみ。実際にトークンを検証して
+-- メンバー行を作るのはEdge Function（service_role、RLSをbypass）なので
+-- ここに一般メンバー・匿名向けのポリシーは不要。
+alter table public.member_invites enable row level security;
+
+drop policy if exists "member_invites admin only" on public.member_invites;
+create policy "member_invites admin only"
+on public.member_invites for all
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
 
 do $$
 begin

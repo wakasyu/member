@@ -160,9 +160,8 @@ async function showRegisterScreen(token) {
   document.getElementById('appShell').classList.add('hidden');
   document.getElementById('registerScreen').classList.remove('hidden');
   try {
-    const data = await callEdgeFunction(`register-member?token=${encodeURIComponent(token)}`, { method: 'GET' });
-    document.getElementById('registerName').value = data.name || '';
-    document.getElementById('registerIntro').textContent = data.name ? `${data.name}さん、ようこそ！以下の情報を入力して登録してください。` : '以下の情報を入力して登録してください。';
+    await callEdgeFunction(`register-member?token=${encodeURIComponent(token)}`, { method: 'GET' });
+    document.getElementById('registerIntro').textContent = 'ようこそ！以下の情報を入力して登録してください。';
   } catch (error) {
     document.getElementById('registerForm').classList.add('hidden');
     showMessage('registerMessage', error.message, false);
@@ -1044,7 +1043,6 @@ function setupAdminTables() {
   document.getElementById('reasonCategoryOptions').addEventListener('click', handleOptionRemoveClick);
   document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
   document.getElementById('adminPolls').addEventListener('click', handleAdminPollsClick);
-  document.getElementById('memberInviteBox').addEventListener('click', handleMemberInviteClick);
 }
 
 function handleAdminEventsClick(domEvent) {
@@ -1067,31 +1065,6 @@ function handleAdminMembersClick(domEvent) {
   else if (deleteButton) deleteMember(deleteButton.dataset.deleteMember);
   else if (upButton) moveMember(upButton.dataset.moveMemberUp, 'up');
   else if (downButton) moveMember(downButton.dataset.moveMemberDown, 'down');
-}
-
-function handleMemberInviteClick(domEvent) {
-  const inviteButton = domEvent.target.closest('[data-invite-member-form]');
-  if (inviteButton) issueInviteLink(inviteButton.dataset.inviteMemberForm, inviteButton).then(renderMemberInviteBox);
-}
-
-function renderMemberInviteBox() {
-  const box = document.getElementById('memberInviteBox');
-  const status = document.getElementById('memberInviteStatus');
-  if (!box || !status) return;
-  const memberId = document.getElementById('memberId').value;
-  if (!memberId) {
-    box.classList.add('hidden');
-    return;
-  }
-  const member = publicData.members.find(item => item.memberId === memberId);
-  if (!member) {
-    box.classList.add('hidden');
-    return;
-  }
-  box.classList.remove('hidden');
-  status.innerHTML = member.registeredAt
-    ? '<span class="muted">登録済みです。</span>'
-    : `<button type="button" data-invite-member-form="${escapeAttr(member.memberId)}">招待リンク${member.registrationToken ? 'をコピー' : 'を発行'}</button>`;
 }
 
 function handlePublicListClick(domEvent) {
@@ -1192,21 +1165,19 @@ function createRegisterUrl(token) {
   return `${base}?register=${encodeURIComponent(token)}`;
 }
 
-async function issueInviteLink(memberId, buttonEl) {
+async function issueNewMemberInviteLink(buttonEl) {
   if (!isAdmin()) return;
-  const member = publicData.members.find(item => item.memberId === memberId);
-  if (!member) return;
-  let token = member.registrationToken;
-  if (!token) {
-    token = generateInviteToken();
-    const { error } = await supabaseClient.from('members').update({ registration_token: token }).eq('id', memberId);
-    if (error) {
-      alert(error.message);
-      return;
-    }
-    await refreshAll();
+  const token = generateInviteToken();
+  const { error } = await supabaseClient.from('member_invites').insert({
+    token,
+    created_by: sessionUser ? sessionUser.id : null
+  });
+  if (error) {
+    showMessage('newMemberInviteMessage', error.message, false);
+    return;
   }
   const url = createRegisterUrl(token);
+  showMessage('newMemberInviteMessage', '登録リンクを発行しました。', true);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(() => flashButtonText(buttonEl, 'コピーしました')).catch(() => showSharePrompt(url));
   } else {
@@ -1418,10 +1389,9 @@ async function saveMemberForm() {
   }
 
   await appendLog(isEdit ? 'メンバー編集' : 'メンバー追加', '', '', memberId, name, '', '', '');
-  showMessage('memberMessage', isEdit ? 'メンバーを保存しました。' : 'メンバーを保存しました。続けて招待リンクを発行できます。', true);
-  document.getElementById('memberId').value = memberId;
+  showMessage('memberMessage', 'メンバーを保存しました。', true);
+  clearMemberForm();
   await refreshAll();
-  renderMemberInviteBox();
 }
 
 function editMember(memberId) {
@@ -1443,7 +1413,6 @@ function editMember(memberId) {
   document.getElementById('duty').value = member.duty || '';
   document.getElementById('memberNote').value = member.note || '';
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  renderMemberInviteBox();
 }
 
 function clearMemberForm() {
@@ -1452,7 +1421,6 @@ function clearMemberForm() {
   });
   document.getElementById('memberState').value = '在籍';
   document.getElementById('visible').value = 'true';
-  renderMemberInviteBox();
 }
 
 async function appendLog(action, eventId, eventName, memberId, memberName, oldStatus, newStatus, detail) {
@@ -1826,8 +1794,6 @@ function normalizeMember(row) {
     tshirtSize: row.tshirt_size || '',
     duty: row.duty || '',
     sortOrder: Number.isFinite(row.sort_order) ? row.sort_order : 0,
-    registrationToken: row.registration_token || '',
-    registeredAt: row.registered_at || '',
     visible: row.visible !== false,
     createdAt: row.created_at || '',
     updatedAt: row.updated_at || ''

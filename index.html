@@ -308,6 +308,13 @@
         <h2>メンバー追加・編集</h2>
         <input id="memberId" type="hidden">
 
+        <div class="panel-inset">
+          <div class="panel-head"><h3>新規メンバー登録リンク</h3></div>
+          <p class="muted">発行すると、新しく入る人がリンクを開いて名前・連絡先・メールアドレスを自分で入力するだけで、メンバー登録とアカウント作成まで完了できます（事前にここへ何か入力しておく必要はありません）。</p>
+          <button type="button" onclick="issueNewMemberInviteLink(this)">登録リンクを発行</button>
+          <div id="newMemberInviteMessage" class="message"></div>
+        </div>
+
         <div class="panel-head"><h3>基本情報</h3></div>
         <div class="grid4">
           <label>名前（フルネーム）<input id="memberName" type="text"></label>
@@ -338,12 +345,6 @@
           <button type="button" onclick="clearMemberForm()">入力をクリア</button>
         </div>
         <div id="memberMessage" class="message"></div>
-
-        <div id="memberInviteBox" class="panel-inset hidden">
-          <div class="panel-head"><h3>招待リンク</h3></div>
-          <p class="muted">発行すると、本人がログイン不要でリンクを開き、自分の情報を入力してアカウントを作成できます。</p>
-          <div id="memberInviteStatus"></div>
-        </div>
       </section>
 
       <section class="panel admin-section" data-admin-section="eventList">
