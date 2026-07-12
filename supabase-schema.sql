@@ -8,6 +8,17 @@ grant select, insert, update, delete on all tables in schema public to service_r
 grant usage, select on all sequences in schema public to service_role;
 alter default privileges in schema public grant select, insert, update, delete on tables to service_role;
 
+-- 同様に、SQL Editorから直接作成したテーブル（list_optionsなど）は
+-- anon/authenticatedへのGRANTが自動で付かないことがある。
+-- RLSポリシーが実際のアクセス制御を行うので、ここでのGRANTは
+-- 「操作を試みる権限」を開放するだけで安全。
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant select on all tables in schema public to anon;
+grant usage, select on all sequences in schema public to authenticated;
+alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
+alter default privileges in schema public grant select on tables to anon;
+
 -- Database Webhook（メール通知など）で使う。Supabaseダッシュボードの
 -- Database > Webhooks からWebhookを1つ以上作ると自動で有効化されるインフラだが、
 -- SQLからも明示的にセットアップしておく。
