@@ -239,6 +239,35 @@ create table if not exists public.list_options (
   unique (option_type, label)
 );
 
+-- 新しい予定を立てる前段階の「期間指定の日程調整」。
+-- 特定の1予定に紐づく出欠（answers）とは別物で、期間内の日付×時間帯ごとに
+-- 各メンバーが空いている時間をドラッグ選択して申告する。
+create table if not exists public.availability_polls (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  note text not null default '',
+  period_start date not null,
+  period_end date not null,
+  day_start_minutes integer not null default 540,
+  day_end_minutes integer not null default 1320,
+  slot_minutes integer not null default 30,
+  public_state text not null default '公開' check (public_state in ('公開', '削除')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- 1メンバー・1日・1時間帯（slot_start_minutesはその日の0:00からの分）ごとに
+-- 「空いている」という申告を1行で表す。ドラッグ選択の追加/解除はinsert/deleteで行う。
+create table if not exists public.availability_slots (
+  id uuid primary key default gen_random_uuid(),
+  poll_id uuid not null references public.availability_polls(id) on delete cascade,
+  member_id uuid not null references public.members(id) on delete cascade,
+  slot_date date not null,
+  slot_start_minutes integer not null,
+  created_at timestamptz not null default now(),
+  unique (poll_id, member_id, slot_date, slot_start_minutes)
+);
+
 alter table public.profiles enable row level security;
 alter table public.members enable row level security;
 alter table public.events enable row level security;
@@ -446,6 +475,60 @@ on public.list_options for all
 to authenticated
 using (public.is_admin())
 with check (public.is_admin());
+
+alter table public.availability_polls enable row level security;
+alter table public.availability_slots enable row level security;
+
+drop policy if exists "availability_polls read authenticated" on public.availability_polls;
+create policy "availability_polls read authenticated"
+on public.availability_polls for select
+to authenticated
+using (true);
+
+drop policy if exists "availability_polls write admin" on public.availability_polls;
+create policy "availability_polls write admin"
+on public.availability_polls for all
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
+
+-- 全員分の入力が見えないと「重なっている時間帯」を計算できないため、
+-- 出欠回答(answers)と同様に閲覧は全員に開放し、書き込みは本人か管理者のみに絞る。
+drop policy if exists "availability_slots read authenticated" on public.availability_slots;
+create policy "availability_slots read authenticated"
+on public.availability_slots for select
+to authenticated
+using (true);
+
+drop policy if exists "availability_slots write self or admin" on public.availability_slots;
+create policy "availability_slots write self or admin"
+on public.availability_slots for all
+to authenticated
+using (
+  public.is_admin()
+  or member_id = (select member_id from public.profiles where id = auth.uid())
+)
+with check (
+  public.is_admin()
+  or member_id = (select member_id from public.profiles where id = auth.uid())
+);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'availability_polls'
+  ) then
+    alter publication supabase_realtime add table public.availability_polls;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'availability_slots'
+  ) then
+    alter publication supabase_realtime add table public.availability_slots;
+  end if;
+end;
+$$;
 
 -- トップページのスライドショー写真置き場。ログインしていない人には一切見せない
 -- （publicなbucketにしない = 直リンクでも見えないようにする）。

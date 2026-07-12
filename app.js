@@ -13,6 +13,15 @@ let refreshTimer = null;
 let adminTablesBound = false;
 const messageTimers = new Map();
 
+let availabilityPolls = [];
+let currentPoll = null;
+let currentPollSlots = [];
+let pollMode = 'input';
+let pollWeekOffset = 0;
+let pollDrag = null;
+let pollViewInitialized = false;
+let pollRefreshTimer = null;
+
 document.addEventListener('DOMContentLoaded', initializeApp);
 
 // logo.jpgはInstagramアイコン用の正方形画像（白背景に丸いデザイン）のため、
@@ -275,6 +284,8 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, scheduleRefresh)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'answers' }, scheduleRefresh)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'list_options' }, scheduleOptionsRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'availability_polls' }, schedulePollsRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'availability_slots' }, schedulePollSlotsRefresh)
     .subscribe();
 }
 
@@ -291,6 +302,22 @@ function scheduleOptionsRefresh() {
     await loadOptions();
     renderOptionManager();
     refreshCategorySelects();
+  }, 400);
+}
+
+function schedulePollsRefresh() {
+  clearTimeout(pollRefreshTimer);
+  pollRefreshTimer = setTimeout(async () => {
+    await loadAvailabilityPolls();
+  }, 400);
+}
+
+function schedulePollSlotsRefresh() {
+  clearTimeout(pollRefreshTimer);
+  pollRefreshTimer = setTimeout(async () => {
+    if (!currentPoll) return;
+    await loadPollSlots(currentPoll.pollId);
+    renderPollView();
   }, 400);
 }
 
@@ -1012,6 +1039,7 @@ function setupAdminTables() {
   document.getElementById('eventCategoryOptions').addEventListener('click', handleOptionRemoveClick);
   document.getElementById('reasonCategoryOptions').addEventListener('click', handleOptionRemoveClick);
   document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
+  document.getElementById('adminPolls').addEventListener('click', handleAdminPollsClick);
 }
 
 function handleAdminEventsClick(domEvent) {
@@ -1059,6 +1087,7 @@ function renderAdmin() {
   renderAdminLogs();
   renderOptionManager();
   renderTopPhotoManager();
+  renderAdminPolls();
 }
 
 function renderAdminEvents() {
@@ -1422,6 +1451,15 @@ function switchView(name) {
   document.body.classList.toggle('top-active', name === 'top');
   const backdrop = document.getElementById('topPhotoBackdrop');
   if (backdrop) backdrop.classList.toggle('hidden', name !== 'top');
+  if (name === 'poll') initPollView();
+}
+
+async function initPollView() {
+  setupPollGridEvents();
+  if (!pollViewInitialized) {
+    pollViewInitialized = true;
+    await loadAvailabilityPolls();
+  }
 }
 
 let topHeroSlides = [];
@@ -1818,4 +1856,520 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value).replaceAll('`', '&#096;');
+}
+
+// ==========================================================================
+// 候補日程調整（期間指定・ドラッグ入力の空き時間集計）
+// 特定の1予定への出欠（answers）とは別物。新しい予定を立てる前段階として、
+// 期間内の日付×時間帯ごとに各メンバーが空いている時間を申告し合い、
+// 重なりが多い時間帯・日を自動で提案する。
+// ==========================================================================
+
+function normalizePoll(row) {
+  return {
+    pollId: row.id,
+    title: row.title,
+    note: row.note || '',
+    periodStart: normalizeDate(row.period_start),
+    periodEnd: normalizeDate(row.period_end),
+    dayStartMinutes: Number.isFinite(row.day_start_minutes) ? row.day_start_minutes : 540,
+    dayEndMinutes: Number.isFinite(row.day_end_minutes) ? row.day_end_minutes : 1320,
+    slotMinutes: Number.isFinite(row.slot_minutes) ? row.slot_minutes : 30,
+    publicState: row.public_state || '公開',
+    createdAt: row.created_at || ''
+  };
+}
+
+async function loadAvailabilityPolls() {
+  const { data, error } = await supabaseClient.from('availability_polls').select('*').order('period_start', { ascending: false });
+  if (error) return;
+  availabilityPolls = (data || []).map(normalizePoll);
+  renderPollSelect();
+  if (isAdmin()) renderAdminPolls();
+}
+
+function renderPollSelect() {
+  const select = document.getElementById('pollSelect');
+  if (!select) return;
+  const visible = availabilityPolls.filter(poll => poll.publicState !== '削除');
+  const previous = select.value;
+  select.innerHTML = '<option value="">候補日程調整を選択してください</option>' +
+    visible.map(poll => `<option value="${escapeAttr(poll.pollId)}">${escapeHtml(poll.title)}（${escapeHtml(formatDate(poll.periodStart))}〜${escapeHtml(formatDate(poll.periodEnd))}）</option>`).join('');
+  if (visible.some(poll => poll.pollId === previous)) {
+    select.value = previous;
+  } else if (currentPoll) {
+    currentPoll = null;
+    document.getElementById('pollBox').classList.add('hidden');
+    document.getElementById('pollStatus').textContent = 'この候補日程調整は終了しました。候補日程調整を選択してください。';
+  }
+}
+
+async function onPollSelectChange() {
+  const select = document.getElementById('pollSelect');
+  const pollId = select.value;
+  if (!pollId) {
+    currentPoll = null;
+    document.getElementById('pollBox').classList.add('hidden');
+    document.getElementById('pollStatus').textContent = '候補日程調整を選択してください。';
+    return;
+  }
+  currentPoll = availabilityPolls.find(poll => poll.pollId === pollId);
+  if (!currentPoll) return;
+  document.getElementById('pollStatus').textContent = '';
+  document.getElementById('pollBox').classList.remove('hidden');
+  document.getElementById('pollNote').textContent = currentPoll.note || '';
+  pollWeekOffset = 0;
+  pollMode = 'input';
+  await loadPollSlots(pollId);
+  renderPollView();
+}
+
+async function loadPollSlots(pollId) {
+  const { data, error } = await supabaseClient.from('availability_slots').select('*').eq('poll_id', pollId);
+  if (error) {
+    document.getElementById('pollStatus').textContent = `読み込みに失敗しました：${error.message}`;
+    currentPollSlots = [];
+    return;
+  }
+  currentPollSlots = (data || []).map(row => ({
+    memberId: row.member_id,
+    date: normalizeDate(row.slot_date),
+    start: row.slot_start_minutes
+  }));
+}
+
+function toIsoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function timeToMinutes(value) {
+  const parts = String(value || '0:0').split(':').map(Number);
+  return (parts[0] || 0) * 60 + (parts[1] || 0);
+}
+
+function minutesToLabel(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function getPollSlotStarts(poll) {
+  const starts = [];
+  for (let m = poll.dayStartMinutes; m < poll.dayEndMinutes; m += poll.slotMinutes) starts.push(m);
+  return starts;
+}
+
+function getPollWeekDates(poll, weekOffset) {
+  const start = parseDate(poll.periodStart);
+  const end = parseDate(poll.periodEnd);
+  if (!start || !end) return [];
+  const weekStart = new Date(start);
+  weekStart.setDate(weekStart.getDate() + weekOffset * 7);
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    if (d < start || d > end) continue;
+    dates.push(d);
+  }
+  return dates;
+}
+
+function movePollWeek(delta) {
+  if (!currentPoll) return;
+  const newOffset = pollWeekOffset + delta;
+  if (newOffset < 0) return;
+  const start = parseDate(currentPoll.periodStart);
+  const end = parseDate(currentPoll.periodEnd);
+  const candidateStart = new Date(start);
+  candidateStart.setDate(candidateStart.getDate() + newOffset * 7);
+  if (candidateStart > end) return;
+  pollWeekOffset = newOffset;
+  renderPollView();
+}
+
+function setPollMode(mode) {
+  pollMode = mode;
+  renderPollView();
+}
+
+function renderPollView() {
+  if (!currentPoll) return;
+  document.getElementById('pollModeInputButton').classList.toggle('active', pollMode === 'input');
+  document.getElementById('pollModeResultButton').classList.toggle('active', pollMode === 'result');
+  document.getElementById('pollInputHint').classList.toggle('hidden', pollMode !== 'input');
+  document.getElementById('pollSuggestions').classList.toggle('hidden', pollMode !== 'result');
+
+  const dates = getPollWeekDates(currentPoll, pollWeekOffset);
+  const navButtons = document.querySelectorAll('.poll-week-nav button');
+  const start = parseDate(currentPoll.periodStart);
+  const end = parseDate(currentPoll.periodEnd);
+  const nextWeekStart = new Date(start);
+  nextWeekStart.setDate(nextWeekStart.getDate() + (pollWeekOffset + 1) * 7);
+  if (navButtons[0]) navButtons[0].disabled = pollWeekOffset <= 0;
+  if (navButtons[1]) navButtons[1].disabled = nextWeekStart > end;
+
+  if (!dates.length) {
+    document.getElementById('pollWeekLabel').textContent = '';
+    document.getElementById('pollGridWrap').innerHTML = '<p class="muted">表示できる日付がありません。</p>';
+    return;
+  }
+  document.getElementById('pollWeekLabel').textContent = `${formatDate(toIsoDate(dates[0]))} 〜 ${formatDate(toIsoDate(dates[dates.length - 1]))}`;
+
+  const starts = getPollSlotStarts(currentPoll);
+  const myMemberId = currentProfile ? currentProfile.member_id : null;
+
+  let countMap = null;
+  let namesMap = null;
+  let maxCount = 1;
+  if (pollMode === 'result') {
+    countMap = new Map();
+    namesMap = new Map();
+    currentPollSlots.forEach(slot => {
+      const key = `${slot.date}_${slot.start}`;
+      countMap.set(key, (countMap.get(key) || 0) + 1);
+      const member = publicData.members.find(item => item.memberId === slot.memberId);
+      const list = namesMap.get(key) || [];
+      list.push(member ? displayName(member) : '');
+      namesMap.set(key, list);
+    });
+    if (countMap.size) maxCount = Math.max(...Array.from(countMap.values()));
+  }
+
+  const mySelectedKeys = new Set(
+    myMemberId ? currentPollSlots.filter(slot => slot.memberId === myMemberId).map(slot => `${slot.date}_${slot.start}`) : []
+  );
+
+  const headerCells = dates.map(d => {
+    const label = `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+    return `<div class="poll-col-head">${escapeHtml(label)}</div>`;
+  }).join('');
+
+  const rows = starts.map(start => {
+    const timeLabel = minutesToLabel(start);
+    const cells = dates.map(d => {
+      const iso = toIsoDate(d);
+      const key = `${iso}_${start}`;
+      if (pollMode === 'input') {
+        const selected = mySelectedKeys.has(key);
+        return `<div class="poll-cell ${selected ? 'selected' : ''}" data-date="${escapeAttr(iso)}" data-start="${start}"></div>`;
+      }
+      const count = countMap.get(key) || 0;
+      const intensity = count ? Math.min(1, 0.15 + 0.75 * (count / maxCount)) : 0;
+      const names = (namesMap.get(key) || []).join('、');
+      return `<div class="poll-cell result" style="--intensity:${intensity}" title="${escapeAttr(names)}">${count || ''}</div>`;
+    }).join('');
+    return `<div class="poll-row"><div class="poll-time-label">${timeLabel}</div>${cells}</div>`;
+  }).join('');
+
+  document.getElementById('pollGridWrap').innerHTML = `
+    <div class="poll-grid" style="--poll-cols:${dates.length}">
+      <div class="poll-row poll-row-head"><div class="poll-time-label"></div>${headerCells}</div>
+      ${rows}
+    </div>
+  `;
+
+  if (pollMode === 'result') renderPollSuggestions();
+}
+
+function computeSuggestions() {
+  if (!currentPoll) return { blocks: [], days: [] };
+  const starts = getPollSlotStarts(currentPoll);
+  const byDateStart = new Map();
+  currentPollSlots.forEach(slot => {
+    const key = `${slot.date}_${slot.start}`;
+    if (!byDateStart.has(key)) byDateStart.set(key, new Set());
+    byDateStart.get(key).add(slot.memberId);
+  });
+
+  const dates = Array.from(new Set(currentPollSlots.map(slot => slot.date))).sort();
+
+  const dayPeaks = dates.map(date => {
+    let peak = 0;
+    starts.forEach(start => {
+      const set = byDateStart.get(`${date}_${start}`);
+      if (set && set.size > peak) peak = set.size;
+    });
+    return { date, peak };
+  }).filter(day => day.peak > 0).sort((a, b) => b.peak - a.peak).slice(0, 3);
+
+  const blocks = [];
+  dates.forEach(date => {
+    let current = null;
+    starts.forEach(start => {
+      const set = byDateStart.get(`${date}_${start}`) || new Set();
+      const key = set.size ? Array.from(set).sort().join(',') : '';
+      if (current && current.key === key && key !== '') {
+        current.endExclusive = start + currentPoll.slotMinutes;
+      } else {
+        if (current && current.key !== '') blocks.push(current);
+        current = key ? { date, key, count: set.size, start, endExclusive: start + currentPoll.slotMinutes } : null;
+      }
+    });
+    if (current && current.key !== '') blocks.push(current);
+  });
+
+  const topBlocks = blocks
+    .sort((a, b) => (b.count - a.count) || ((b.endExclusive - b.start) - (a.endExclusive - a.start)))
+    .slice(0, 3);
+
+  return { blocks: topBlocks, days: dayPeaks };
+}
+
+function renderPollSuggestions() {
+  const { blocks, days } = computeSuggestions();
+  const box = document.getElementById('pollSuggestions');
+  if (!box) return;
+
+  const blockHtml = blocks.length
+    ? blocks.map(block => {
+        const names = block.key.split(',').filter(Boolean).map(id => {
+          const member = publicData.members.find(item => item.memberId === id);
+          return member ? displayName(member) : '';
+        }).join('・');
+        return `<li>${escapeHtml(formatDate(block.date))} ${minutesToLabel(block.start)}〜${minutesToLabel(block.endExclusive)}　<strong>${block.count}人</strong>（${escapeHtml(names)}）</li>`;
+      }).join('')
+    : '<li class="muted">まだ十分な回答がありません。</li>';
+
+  const dayHtml = days.length
+    ? days.map(day => `<li>${escapeHtml(formatDate(day.date))}　ピーク<strong>${day.peak}人</strong></li>`).join('')
+    : '<li class="muted">まだ十分な回答がありません。</li>';
+
+  box.innerHTML = `
+    <div class="poll-suggestion-group">
+      <h3>みんなが空いている時間帯 候補トップ3</h3>
+      <ul>${blockHtml}</ul>
+    </div>
+    <div class="poll-suggestion-group">
+      <h3>参加可能人数が多い日 候補トップ3</h3>
+      <ul>${dayHtml}</ul>
+    </div>
+  `;
+}
+
+function setupPollGridEvents() {
+  const wrap = document.getElementById('pollGridWrap');
+  if (!wrap || wrap.dataset.bound) return;
+  wrap.dataset.bound = 'true';
+  wrap.addEventListener('mousedown', onPollCellDown);
+  wrap.addEventListener('mouseover', onPollCellEnter);
+  document.addEventListener('mouseup', onPollCellUp);
+  wrap.addEventListener('touchstart', onPollCellTouchStart, { passive: false });
+  wrap.addEventListener('touchmove', onPollCellTouchMove, { passive: false });
+  wrap.addEventListener('touchend', onPollCellUp);
+}
+
+function applyPollDragToCell(cell) {
+  if (!cell || !cell.dataset.date) return;
+  const key = `${cell.dataset.date}_${cell.dataset.start}`;
+  if (pollDrag.keys.has(key)) return;
+  pollDrag.keys.add(key);
+  cell.classList.toggle('selected', pollDrag.add);
+}
+
+function onPollCellDown(domEvent) {
+  if (pollMode !== 'input') return;
+  const cell = domEvent.target.closest('.poll-cell');
+  if (!cell || !cell.dataset.date) return;
+  domEvent.preventDefault();
+  pollDrag = { add: !cell.classList.contains('selected'), keys: new Set() };
+  applyPollDragToCell(cell);
+}
+
+function onPollCellEnter(domEvent) {
+  if (!pollDrag) return;
+  const cell = domEvent.target.closest('.poll-cell');
+  applyPollDragToCell(cell);
+}
+
+function onPollCellTouchStart(domEvent) {
+  if (pollMode !== 'input') return;
+  const touch = domEvent.touches[0];
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const cell = el && el.closest ? el.closest('.poll-cell') : null;
+  if (!cell || !cell.dataset.date) return;
+  domEvent.preventDefault();
+  pollDrag = { add: !cell.classList.contains('selected'), keys: new Set() };
+  applyPollDragToCell(cell);
+}
+
+function onPollCellTouchMove(domEvent) {
+  if (!pollDrag) return;
+  domEvent.preventDefault();
+  const touch = domEvent.touches[0];
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const cell = el && el.closest ? el.closest('.poll-cell') : null;
+  applyPollDragToCell(cell);
+}
+
+async function onPollCellUp() {
+  if (!pollDrag) return;
+  const drag = pollDrag;
+  pollDrag = null;
+  if (!drag.keys.size) return;
+  await commitPollDrag(drag);
+}
+
+async function commitPollDrag(drag) {
+  if (!currentPoll) return;
+  const memberId = currentProfile ? currentProfile.member_id : null;
+  if (!memberId) {
+    alert('メンバーに紐付いたアカウントでログインしてください。');
+    renderPollView();
+    return;
+  }
+
+  const toAdd = [];
+  const toRemove = [];
+  drag.keys.forEach(key => {
+    const separatorIndex = key.lastIndexOf('_');
+    const date = key.slice(0, separatorIndex);
+    const start = Number(key.slice(separatorIndex + 1));
+    if (drag.add) toAdd.push({ poll_id: currentPoll.pollId, member_id: memberId, slot_date: date, slot_start_minutes: start });
+    else toRemove.push({ date, start });
+  });
+
+  if (toAdd.length) {
+    const { error } = await supabaseClient.from('availability_slots')
+      .upsert(toAdd, { onConflict: 'poll_id,member_id,slot_date,slot_start_minutes' });
+    if (error) alert(error.message);
+  }
+  for (const { date, start } of toRemove) {
+    await supabaseClient.from('availability_slots')
+      .delete()
+      .eq('poll_id', currentPoll.pollId)
+      .eq('member_id', memberId)
+      .eq('slot_date', date)
+      .eq('slot_start_minutes', start);
+  }
+
+  await loadPollSlots(currentPoll.pollId);
+  renderPollView();
+}
+
+async function savePollForm() {
+  if (!isAdmin()) return;
+  const isEdit = Boolean(document.getElementById('pollId').value);
+  const pollId = document.getElementById('pollId').value || crypto.randomUUID();
+  const title = document.getElementById('pollTitle').value.trim();
+  const periodStart = document.getElementById('pollPeriodStart').value;
+  const periodEnd = document.getElementById('pollPeriodEnd').value;
+
+  if (!title || !periodStart || !periodEnd) {
+    showMessage('pollFormMessage', 'タイトル・期間開始・期間終了は必須です。', false);
+    return;
+  }
+  if (periodEnd < periodStart) {
+    showMessage('pollFormMessage', '期間終了は期間開始以降にしてください。', false);
+    return;
+  }
+
+  const dayStartMinutes = timeToMinutes(document.getElementById('pollDayStart').value || '09:00');
+  const dayEndMinutes = timeToMinutes(document.getElementById('pollDayEnd').value || '22:00');
+  if (dayEndMinutes <= dayStartMinutes) {
+    showMessage('pollFormMessage', '1日の終了時刻は開始時刻より後にしてください。', false);
+    return;
+  }
+
+  const payload = {
+    id: pollId,
+    title,
+    note: document.getElementById('pollNoteInput').value.trim(),
+    period_start: periodStart,
+    period_end: periodEnd,
+    day_start_minutes: dayStartMinutes,
+    day_end_minutes: dayEndMinutes,
+    slot_minutes: Number(document.getElementById('pollSlotMinutes').value),
+    updated_at: new Date().toISOString()
+  };
+
+  const button = document.getElementById('savePollButton');
+  const restore = setButtonBusy(button, '保存中...');
+  const { error } = await supabaseClient.from('availability_polls').upsert(payload);
+  restore();
+  if (error) {
+    showMessage('pollFormMessage', error.message, false);
+    return;
+  }
+
+  await appendLog(isEdit ? '候補日程調整編集' : '候補日程調整作成', '', '', '', '', '', '', title);
+  showMessage('pollFormMessage', '保存しました。', true);
+  clearPollForm();
+  await loadAvailabilityPolls();
+}
+
+function clearPollForm() {
+  document.getElementById('pollId').value = '';
+  document.getElementById('pollTitle').value = '';
+  document.getElementById('pollPeriodStart').value = '';
+  document.getElementById('pollPeriodEnd').value = '';
+  document.getElementById('pollDayStart').value = '09:00';
+  document.getElementById('pollDayEnd').value = '22:00';
+  document.getElementById('pollSlotMinutes').value = '30';
+  document.getElementById('pollNoteInput').value = '';
+}
+
+function editPollForm(pollId) {
+  const poll = availabilityPolls.find(item => item.pollId === pollId);
+  if (!poll) return;
+  switchAdminTab('polls');
+  document.getElementById('pollId').value = poll.pollId;
+  document.getElementById('pollTitle').value = poll.title;
+  document.getElementById('pollPeriodStart').value = poll.periodStart;
+  document.getElementById('pollPeriodEnd').value = poll.periodEnd;
+  document.getElementById('pollDayStart').value = minutesToLabel(poll.dayStartMinutes);
+  document.getElementById('pollDayEnd').value = minutesToLabel(poll.dayEndMinutes);
+  document.getElementById('pollSlotMinutes').value = String(poll.slotMinutes);
+  document.getElementById('pollNoteInput').value = poll.note || '';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function deletePollEntry(pollId) {
+  if (!isAdmin() || !confirm('この候補日程調整を削除しますか？（メンバーが入力した空き時間データは残ります）')) return;
+  const { error } = await supabaseClient.from('availability_polls').update({ public_state: '削除' }).eq('id', pollId);
+  if (error) {
+    alert(error.message);
+    return;
+  }
+  await appendLog('候補日程調整削除', '', '', '', '', '', '', '');
+  await loadAvailabilityPolls();
+}
+
+async function restorePollEntry(pollId) {
+  if (!isAdmin()) return;
+  const { error } = await supabaseClient.from('availability_polls').update({ public_state: '公開' }).eq('id', pollId);
+  if (error) {
+    alert(error.message);
+    return;
+  }
+  await appendLog('候補日程調整復元', '', '', '', '', '', '', '');
+  await loadAvailabilityPolls();
+}
+
+function renderAdminPolls() {
+  const container = document.getElementById('adminPolls');
+  if (!container) return;
+  const rows = availabilityPolls.map(poll => `
+    <tr>
+      <td data-label="状態">${escapeHtml(poll.publicState === '削除' ? '削除済み' : '公開')}</td>
+      <td data-label="タイトル">${escapeHtml(poll.title)}</td>
+      <td data-label="期間">${escapeHtml(formatDate(poll.periodStart))}〜${escapeHtml(formatDate(poll.periodEnd))}</td>
+      <td data-label="操作">
+        <button type="button" data-edit-poll="${escapeAttr(poll.pollId)}">編集</button>
+        ${poll.publicState === '削除'
+          ? `<button type="button" data-restore-poll="${escapeAttr(poll.pollId)}">復元</button>`
+          : `<button type="button" class="danger" data-delete-poll="${escapeAttr(poll.pollId)}">削除</button>`}
+      </td>
+    </tr>
+  `).join('');
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>タイトル</th><th>期間</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="4">候補日程調整がありません。</td></tr>'}</tbody></table></div>`;
+}
+
+function handleAdminPollsClick(domEvent) {
+  const editButton = domEvent.target.closest('[data-edit-poll]');
+  const deleteButton = domEvent.target.closest('[data-delete-poll]');
+  const restoreButton = domEvent.target.closest('[data-restore-poll]');
+  if (editButton) editPollForm(editButton.dataset.editPoll);
+  else if (deleteButton) deletePollEntry(deleteButton.dataset.deletePoll);
+  else if (restoreButton) restorePollEntry(restoreButton.dataset.restorePoll);
 }
