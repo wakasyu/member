@@ -125,6 +125,8 @@ alter table public.members add column if not exists birth_date date null;
 alter table public.members add column if not exists tshirt_size text not null default '';
 -- 担当（役割）を管理できるようにする
 alter table public.members add column if not exists duty text not null default '';
+-- 予定一覧などでの表示順。管理画面のメンバー一覧から並び替えられるようにする
+alter table public.members add column if not exists sort_order integer not null default 0;
 
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),

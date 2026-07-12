@@ -28,10 +28,18 @@ async function initializeApp() {
   document.getElementById('forgotPasswordButton').addEventListener('click', requestPasswordReset);
   document.getElementById('passwordResetForm').addEventListener('submit', submitNewPassword);
 
+  // Supabaseのメールリンクの形式（#access_token=...&type=recovery か ?code=...）に
+  // 依存せず確実に拾えるよう、URLの文字列チェックに加えてSDK側のイベントでも検知する。
+  supabaseClient.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      showPasswordResetScreen();
+    }
+  });
+
   const params = new URLSearchParams(window.location.search);
   currentAnswerToken = params.get('schedule') || params.get('answer') || '';
 
-  if (window.location.hash.includes('type=recovery')) {
+  if (window.location.hash.includes('type=recovery') || params.get('type') === 'recovery' || params.has('code')) {
     showPasswordResetScreen();
     return;
   }
@@ -251,7 +259,7 @@ async function loadPublicData() {
 
   const [{ data: events, error: eventError }, { data: members, error: memberError }, { data: answers, error: answerError }] = await Promise.all([
     supabaseClient.from('events').select('*').order('date', { ascending: true }),
-    supabaseClient.from('members').select('*').order('name', { ascending: true }),
+    supabaseClient.from('members').select('*').order('sort_order', { ascending: true }).order('name', { ascending: true }),
     supabaseClient.from('answers').select('*')
   ]);
 
@@ -890,7 +898,11 @@ function handleAdminEventsClick(domEvent) {
 
 function handleAdminMembersClick(domEvent) {
   const editButton = domEvent.target.closest('[data-edit-member]');
+  const upButton = domEvent.target.closest('[data-move-member-up]');
+  const downButton = domEvent.target.closest('[data-move-member-down]');
   if (editButton) editMember(editButton.dataset.editMember);
+  else if (upButton) moveMember(upButton.dataset.moveMemberUp, 'up');
+  else if (downButton) moveMember(downButton.dataset.moveMemberDown, 'down');
 }
 
 function handlePublicListClick(domEvent) {
@@ -925,13 +937,13 @@ function renderAdminEvents() {
       : `<button type="button" data-edit-event="${escapeAttr(event.eventId)}">編集</button> <button class="danger" type="button" data-delete-event="${escapeAttr(event.eventId)}">削除</button>`;
     return `
     <tr class="${isArchived ? 'is-archived' : ''}">
-      <td>${escapeHtml(event.publicState)}</td>
-      <td>${escapeHtml(event.category)}</td>
-      <td class="wrap">${escapeHtml(event.eventName)}</td>
-      <td>${escapeHtml(formatDate(event.date))}</td>
-      <td>${escapeHtml([event.startTime, event.endTime].filter(Boolean).join(' - '))}</td>
-      <td class="wrap"><div class="share-actions"><a href="${escapeAttr(event.answerUrl)}" target="_blank" rel="noopener noreferrer">日程調整リンク</a><button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button></div></td>
-      <td>${actionButtons}</td>
+      <td data-label="状態">${escapeHtml(event.publicState)}</td>
+      <td data-label="分類">${escapeHtml(event.category)}</td>
+      <td class="wrap" data-label="予定名">${escapeHtml(event.eventName)}</td>
+      <td data-label="日付">${escapeHtml(formatDate(event.date))}</td>
+      <td data-label="時間">${escapeHtml([event.startTime, event.endTime].filter(Boolean).join(' - '))}</td>
+      <td class="wrap" data-label="日程調整リンク"><div class="share-actions"><a href="${escapeAttr(event.answerUrl)}" target="_blank" rel="noopener noreferrer">日程調整リンク</a><button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button></div></td>
+      <td data-label="操作">${actionButtons}</td>
     </tr>
   `;
   }).join('');
@@ -941,36 +953,58 @@ function renderAdminEvents() {
 function renderAdminMembers() {
   const showAllCheckbox = document.getElementById('showAllMemberColumns');
   const showAll = showAllCheckbox ? showAllCheckbox.checked : false;
-  const rows = publicData.members.map(member => {
+  const ordered = publicData.members;
+  const rows = ordered.map((member, index) => {
     const age = computeAge(member.birthDate);
     const birthDateHtml = member.birthDate
       ? `${escapeHtml(formatDate(member.birthDate))}${age !== null ? `<span class="muted"> (${age}歳)</span>` : ''}`
       : '';
     const detailCells = showAll ? `
-      <td>${escapeHtml(member.shortName || '')}</td>
-      <td>${birthDateHtml}</td>
-      <td>${escapeHtml(member.joinDate ? formatDate(member.joinDate) : '')}</td>
-      <td>${escapeHtml(member.leaveDate ? formatDate(member.leaveDate) : '')}</td>
-      <td>${escapeHtml(member.costumeSize || '')}</td>
-      <td>${escapeHtml(member.tshirtSize || '')}</td>
-      <td class="wrap">${escapeHtml(member.note || '')}</td>
+      <td data-label="表示名">${escapeHtml(member.shortName || '')}</td>
+      <td data-label="生年月日">${birthDateHtml}</td>
+      <td data-label="入会日">${escapeHtml(member.joinDate ? formatDate(member.joinDate) : '')}</td>
+      <td data-label="退会日">${escapeHtml(member.leaveDate ? formatDate(member.leaveDate) : '')}</td>
+      <td data-label="衣装">${escapeHtml(member.costumeSize || '')}</td>
+      <td data-label="Tシャツ">${escapeHtml(member.tshirtSize || '')}</td>
+      <td class="wrap" data-label="備考">${escapeHtml(member.note || '')}</td>
     ` : '';
     return `
     <tr>
-      <td>${escapeHtml(member.visible ? '表示' : '非表示')}</td>
-      <td>${escapeHtml(member.memberState)}</td>
-      <td>${escapeHtml(member.name)}</td>
-      <td>${escapeHtml(member.grade)}</td>
-      <td class="wrap">${escapeHtml(member.contact || '')}</td>
-      <td>${escapeHtml(member.duty || '')}</td>
+      <td data-label="順"><div class="order-buttons">
+        <button type="button" data-move-member-up="${escapeAttr(member.memberId)}" ${index === 0 ? 'disabled' : ''} title="上へ">▲</button>
+        <button type="button" data-move-member-down="${escapeAttr(member.memberId)}" ${index === ordered.length - 1 ? 'disabled' : ''} title="下へ">▼</button>
+      </div></td>
+      <td data-label="表示">${escapeHtml(member.visible ? '表示' : '非表示')}</td>
+      <td data-label="状態">${escapeHtml(member.memberState)}</td>
+      <td data-label="氏名">${escapeHtml(member.name)}</td>
+      <td data-label="学年">${escapeHtml(member.grade)}</td>
+      <td class="wrap" data-label="電話番号">${escapeHtml(member.contact || '')}</td>
+      <td data-label="担当">${escapeHtml(member.duty || '')}</td>
       ${detailCells}
-      <td><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button></td>
+      <td data-label="操作"><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button></td>
     </tr>
   `;
   }).join('');
   const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>衣装</th><th>Tシャツ</th><th>備考</th>' : '';
-  const colCount = showAll ? 14 : 7;
-  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
+  const colCount = showAll ? 15 : 8;
+  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
+}
+
+async function moveMember(memberId, direction) {
+  if (!isAdmin()) return;
+  const ordered = [...publicData.members];
+  const index = ordered.findIndex(member => member.memberId === memberId);
+  const targetIndex = direction === 'up' ? index - 1 : index + 1;
+  if (index === -1 || targetIndex < 0 || targetIndex >= ordered.length) return;
+  [ordered[index], ordered[targetIndex]] = [ordered[targetIndex], ordered[index]];
+
+  for (let i = 0; i < ordered.length; i++) {
+    if (ordered[i].sortOrder !== i) {
+      await supabaseClient.from('members').update({ sort_order: i }).eq('id', ordered[i].memberId);
+    }
+  }
+  await appendLog('メンバー表示順変更', '', '', memberId, ordered[targetIndex] ? ordered[targetIndex].name : '', '', '', '');
+  await refreshAll();
 }
 
 async function renderAdminLogs() {
@@ -980,7 +1014,16 @@ async function renderAdminLogs() {
     return;
   }
   const rows = (data || []).map(log => `
-    <tr><td>${escapeHtml(formatDateTime(log.created_at))}</td><td>${escapeHtml(log.actor_name || '-')}</td><td>${escapeHtml(log.action)}</td><td class="wrap">${escapeHtml(log.event_name || log.event_id || '-')}</td><td>${escapeHtml(log.member_name || '-')}</td><td>${escapeHtml(log.old_status || '-')}</td><td>${escapeHtml(log.new_status || '-')}</td><td class="wrap">${escapeHtml(log.detail || '-')}</td></tr>
+    <tr>
+      <td data-label="日時">${escapeHtml(formatDateTime(log.created_at))}</td>
+      <td data-label="実行者">${escapeHtml(log.actor_name || '-')}</td>
+      <td data-label="操作">${escapeHtml(log.action)}</td>
+      <td class="wrap" data-label="予定">${escapeHtml(log.event_name || log.event_id || '-')}</td>
+      <td data-label="名前">${escapeHtml(log.member_name || '-')}</td>
+      <td data-label="変更前">${escapeHtml(log.old_status || '-')}</td>
+      <td data-label="変更後">${escapeHtml(log.new_status || '-')}</td>
+      <td class="wrap" data-label="詳細">${escapeHtml(log.detail || '-')}</td>
+    </tr>
   `).join('');
   document.getElementById('adminLogs').innerHTML = `<div class="table-wrap"><table><thead><tr><th>日時</th><th>実行者</th><th>操作</th><th>予定</th><th>名前</th><th>変更前</th><th>変更後</th><th>詳細</th></tr></thead><tbody>${rows || '<tr><td colspan="8">ログがありません。</td></tr>'}</tbody></table></div>`;
 }
@@ -1530,6 +1573,7 @@ function normalizeMember(row) {
     costumeSize: row.costume_size || '',
     tshirtSize: row.tshirt_size || '',
     duty: row.duty || '',
+    sortOrder: Number.isFinite(row.sort_order) ? row.sort_order : 0,
     visible: row.visible !== false,
     createdAt: row.created_at || '',
     updatedAt: row.updated_at || ''
