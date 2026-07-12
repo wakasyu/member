@@ -268,6 +268,17 @@ create table if not exists public.availability_slots (
   unique (poll_id, member_id, slot_date, slot_start_minutes)
 );
 
+-- 候補日程調整に対する、メンバー1人につき1件の自由記述の備考
+-- （「後半は難しいかも」等、時間帯の申告だけでは伝えづらい補足用）
+create table if not exists public.availability_notes (
+  id uuid primary key default gen_random_uuid(),
+  poll_id uuid not null references public.availability_polls(id) on delete cascade,
+  member_id uuid not null references public.members(id) on delete cascade,
+  note text not null default '',
+  updated_at timestamptz not null default now(),
+  unique (poll_id, member_id)
+);
+
 alter table public.profiles enable row level security;
 alter table public.members enable row level security;
 alter table public.events enable row level security;
@@ -513,6 +524,27 @@ with check (
   or member_id = (select member_id from public.profiles where id = auth.uid())
 );
 
+alter table public.availability_notes enable row level security;
+
+drop policy if exists "availability_notes read authenticated" on public.availability_notes;
+create policy "availability_notes read authenticated"
+on public.availability_notes for select
+to authenticated
+using (true);
+
+drop policy if exists "availability_notes write self or admin" on public.availability_notes;
+create policy "availability_notes write self or admin"
+on public.availability_notes for all
+to authenticated
+using (
+  public.is_admin()
+  or member_id = (select member_id from public.profiles where id = auth.uid())
+)
+with check (
+  public.is_admin()
+  or member_id = (select member_id from public.profiles where id = auth.uid())
+);
+
 do $$
 begin
   if not exists (
@@ -526,6 +558,12 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'availability_slots'
   ) then
     alter publication supabase_realtime add table public.availability_slots;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'availability_notes'
+  ) then
+    alter publication supabase_realtime add table public.availability_notes;
   end if;
 end;
 $$;

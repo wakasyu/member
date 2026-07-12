@@ -237,9 +237,13 @@
         <div id="pollStatus" class="status">候補日程調整を選択してください。</div>
         <div id="pollBox" class="hidden">
           <p id="pollNote" class="muted"></p>
+          <label id="pollActingMemberWrap" class="wide-field hidden">
+            代理入力するメンバー（管理者のみ）
+            <select id="pollActingMemberSelect" onchange="onPollActingMemberChange()"><option value="">自分</option></select>
+          </label>
           <div class="poll-toolbar">
             <div class="poll-mode-switch">
-              <button id="pollModeInputButton" type="button" class="poll-mode-button active" onclick="setPollMode('input')">自分の空き時間を入力</button>
+              <button id="pollModeInputButton" type="button" class="poll-mode-button active" onclick="setPollMode('input')">空き時間を入力</button>
               <button id="pollModeResultButton" type="button" class="poll-mode-button" onclick="setPollMode('result')">みんなの結果を見る</button>
             </div>
             <div class="poll-week-nav">
@@ -248,8 +252,16 @@
               <button type="button" onclick="movePollWeek(1)">次の週 ▶</button>
             </div>
           </div>
-          <p id="pollInputHint" class="muted">マス目をドラッグすると、その時間帯に空いている/空いていないを切り替えられます（スマホは指でなぞってください）。</p>
+          <div id="pollInputControls">
+            <p id="pollInputHint" class="muted">マス目をドラッグすると、その時間帯に空いている/空いていないを切り替えられます（スマホは指でなぞってください）。<button type="button" class="link-button" onclick="resetPollSelection()">入力をリセット</button></p>
+          </div>
           <div id="pollGridWrap" class="poll-grid-wrap"></div>
+          <div id="pollNoteInputWrap">
+            <label class="wide-field">
+              備考（任意）
+              <textarea id="pollNoteInputField" placeholder="例：後半なら参加できるかもしれません" onblur="savePollNoteField()"></textarea>
+            </label>
+          </div>
           <div id="pollSuggestions" class="poll-suggestions hidden"></div>
         </div>
       </section>
@@ -326,6 +338,12 @@
           <button type="button" onclick="clearMemberForm()">入力をクリア</button>
         </div>
         <div id="memberMessage" class="message"></div>
+
+        <div id="memberInviteBox" class="panel-inset hidden">
+          <div class="panel-head"><h3>招待リンク</h3></div>
+          <p class="muted">発行すると、本人がログイン不要でリンクを開き、自分の情報を入力してアカウントを作成できます。</p>
+          <div id="memberInviteStatus"></div>
+        </div>
       </section>
 
       <section class="panel admin-section" data-admin-section="eventList">

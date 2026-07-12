@@ -16,11 +16,13 @@ const messageTimers = new Map();
 let availabilityPolls = [];
 let currentPoll = null;
 let currentPollSlots = [];
+let currentPollNotes = [];
 let pollMode = 'input';
 let pollWeekOffset = 0;
 let pollDrag = null;
 let pollViewInitialized = false;
 let pollRefreshTimer = null;
+let pollActingMemberId = '';
 
 document.addEventListener('DOMContentLoaded', initializeApp);
 
@@ -286,6 +288,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'list_options' }, scheduleOptionsRefresh)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'availability_polls' }, schedulePollsRefresh)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'availability_slots' }, schedulePollSlotsRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'availability_notes' }, schedulePollSlotsRefresh)
     .subscribe();
 }
 
@@ -317,6 +320,7 @@ function schedulePollSlotsRefresh() {
   pollRefreshTimer = setTimeout(async () => {
     if (!currentPoll) return;
     await loadPollSlots(currentPoll.pollId);
+    await loadPollNotes(currentPoll.pollId);
     renderPollView();
   }, 400);
 }
@@ -1040,6 +1044,7 @@ function setupAdminTables() {
   document.getElementById('reasonCategoryOptions').addEventListener('click', handleOptionRemoveClick);
   document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
   document.getElementById('adminPolls').addEventListener('click', handleAdminPollsClick);
+  document.getElementById('memberInviteBox').addEventListener('click', handleMemberInviteClick);
 }
 
 function handleAdminEventsClick(domEvent) {
@@ -1058,12 +1063,35 @@ function handleAdminMembersClick(domEvent) {
   const deleteButton = domEvent.target.closest('[data-delete-member]');
   const upButton = domEvent.target.closest('[data-move-member-up]');
   const downButton = domEvent.target.closest('[data-move-member-down]');
-  const inviteButton = domEvent.target.closest('[data-invite-member]');
   if (editButton) editMember(editButton.dataset.editMember);
   else if (deleteButton) deleteMember(deleteButton.dataset.deleteMember);
   else if (upButton) moveMember(upButton.dataset.moveMemberUp, 'up');
   else if (downButton) moveMember(downButton.dataset.moveMemberDown, 'down');
-  else if (inviteButton) issueInviteLink(inviteButton.dataset.inviteMember, inviteButton);
+}
+
+function handleMemberInviteClick(domEvent) {
+  const inviteButton = domEvent.target.closest('[data-invite-member-form]');
+  if (inviteButton) issueInviteLink(inviteButton.dataset.inviteMemberForm, inviteButton).then(renderMemberInviteBox);
+}
+
+function renderMemberInviteBox() {
+  const box = document.getElementById('memberInviteBox');
+  const status = document.getElementById('memberInviteStatus');
+  if (!box || !status) return;
+  const memberId = document.getElementById('memberId').value;
+  if (!memberId) {
+    box.classList.add('hidden');
+    return;
+  }
+  const member = publicData.members.find(item => item.memberId === memberId);
+  if (!member) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  status.innerHTML = member.registeredAt
+    ? '<span class="muted">登録済みです。</span>'
+    : `<button type="button" data-invite-member-form="${escapeAttr(member.memberId)}">招待リンク${member.registrationToken ? 'をコピー' : 'を発行'}</button>`;
 }
 
 function handlePublicListClick(domEvent) {
@@ -1132,9 +1160,6 @@ function renderAdminMembers() {
       <td data-label="Tシャツ">${escapeHtml(member.tshirtSize || '')}</td>
       <td class="wrap" data-label="備考">${escapeHtml(member.note || '')}</td>
     ` : '';
-    const accountCell = member.registeredAt
-      ? '登録済み'
-      : `<button type="button" data-invite-member="${escapeAttr(member.memberId)}">招待リンク${member.registrationToken ? 'をコピー' : 'を発行'}</button>`;
     return `
     <tr>
       <td data-label="順"><div class="order-buttons">
@@ -1148,14 +1173,13 @@ function renderAdminMembers() {
       <td class="wrap" data-label="電話番号">${escapeHtml(member.contact || '')}</td>
       <td data-label="担当">${escapeHtml(member.duty || '')}</td>
       ${detailCells}
-      <td data-label="アカウント">${accountCell}</td>
       <td data-label="操作"><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button> <button type="button" class="danger" data-delete-member="${escapeAttr(member.memberId)}">削除</button></td>
     </tr>
   `;
   }).join('');
   const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>衣装</th><th>Tシャツ</th><th>備考</th>' : '';
-  const colCount = (showAll ? 15 : 8) + 1;
-  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>アカウント</th><th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
+  const colCount = showAll ? 15 : 8;
+  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
 }
 
 function generateInviteToken() {
@@ -1394,9 +1418,10 @@ async function saveMemberForm() {
   }
 
   await appendLog(isEdit ? 'メンバー編集' : 'メンバー追加', '', '', memberId, name, '', '', '');
-  showMessage('memberMessage', 'メンバーを保存しました。', true);
-  clearMemberForm();
+  showMessage('memberMessage', isEdit ? 'メンバーを保存しました。' : 'メンバーを保存しました。続けて招待リンクを発行できます。', true);
+  document.getElementById('memberId').value = memberId;
   await refreshAll();
+  renderMemberInviteBox();
 }
 
 function editMember(memberId) {
@@ -1418,6 +1443,7 @@ function editMember(memberId) {
   document.getElementById('duty').value = member.duty || '';
   document.getElementById('memberNote').value = member.note || '';
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  renderMemberInviteBox();
 }
 
 function clearMemberForm() {
@@ -1426,6 +1452,7 @@ function clearMemberForm() {
   });
   document.getElementById('memberState').value = '在籍';
   document.getElementById('visible').value = 'true';
+  renderMemberInviteBox();
 }
 
 async function appendLog(action, eventId, eventName, memberId, memberName, oldStatus, newStatus, detail) {
@@ -1920,8 +1947,33 @@ async function onPollSelectChange() {
   document.getElementById('pollNote').textContent = currentPoll.note || '';
   pollWeekOffset = 0;
   pollMode = 'input';
+  pollActingMemberId = '';
+  setupPollActingMemberSelect();
   await loadPollSlots(pollId);
+  await loadPollNotes(pollId);
   renderPollView();
+}
+
+function setupPollActingMemberSelect() {
+  const wrap = document.getElementById('pollActingMemberWrap');
+  if (!wrap) return;
+  if (!isAdmin()) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  fillSelect('pollActingMemberSelect', publicData.members.map(member => ({ value: member.memberId, label: memberOptionLabel(member) })), '自分');
+  document.getElementById('pollActingMemberSelect').value = pollActingMemberId || '';
+}
+
+function onPollActingMemberChange() {
+  pollActingMemberId = document.getElementById('pollActingMemberSelect').value;
+  renderPollView();
+}
+
+function getPollActingMemberId() {
+  if (isAdmin() && pollActingMemberId) return pollActingMemberId;
+  return currentProfile ? currentProfile.member_id : null;
 }
 
 async function loadPollSlots(pollId) {
@@ -1936,6 +1988,48 @@ async function loadPollSlots(pollId) {
     date: normalizeDate(row.slot_date),
     start: row.slot_start_minutes
   }));
+}
+
+async function loadPollNotes(pollId) {
+  const { data, error } = await supabaseClient.from('availability_notes').select('*').eq('poll_id', pollId);
+  if (error) {
+    currentPollNotes = [];
+    return;
+  }
+  currentPollNotes = (data || []).map(row => ({ memberId: row.member_id, note: row.note || '' }));
+}
+
+async function savePollNoteField() {
+  if (!currentPoll) return;
+  const memberId = getPollActingMemberId();
+  if (!memberId) return;
+  const note = document.getElementById('pollNoteInputField').value.trim();
+  const existing = currentPollNotes.find(item => item.memberId === memberId);
+  if (existing && existing.note === note) return;
+  const { error } = await supabaseClient.from('availability_notes')
+    .upsert({ poll_id: currentPoll.pollId, member_id: memberId, note, updated_at: new Date().toISOString() }, { onConflict: 'poll_id,member_id' });
+  if (error) {
+    alert(error.message);
+    return;
+  }
+  await loadPollNotes(currentPoll.pollId);
+}
+
+async function resetPollSelection() {
+  if (!currentPoll) return;
+  const memberId = getPollActingMemberId();
+  if (!memberId) return;
+  if (!confirm('この候補日程調整で入力した空き時間をすべてリセットしますか？')) return;
+  const { error } = await supabaseClient.from('availability_slots')
+    .delete()
+    .eq('poll_id', currentPoll.pollId)
+    .eq('member_id', memberId);
+  if (error) {
+    alert(error.message);
+    return;
+  }
+  await loadPollSlots(currentPoll.pollId);
+  renderPollView();
 }
 
 function toIsoDate(date) {
@@ -1997,8 +2091,14 @@ function renderPollView() {
   if (!currentPoll) return;
   document.getElementById('pollModeInputButton').classList.toggle('active', pollMode === 'input');
   document.getElementById('pollModeResultButton').classList.toggle('active', pollMode === 'result');
-  document.getElementById('pollInputHint').classList.toggle('hidden', pollMode !== 'input');
+  document.getElementById('pollInputControls').classList.toggle('hidden', pollMode !== 'input');
+  document.getElementById('pollNoteInputWrap').classList.toggle('hidden', pollMode !== 'input');
   document.getElementById('pollSuggestions').classList.toggle('hidden', pollMode !== 'result');
+
+  const actingMemberId = getPollActingMemberId();
+  const actingNote = currentPollNotes.find(item => item.memberId === actingMemberId);
+  const noteField = document.getElementById('pollNoteInputField');
+  if (noteField && document.activeElement !== noteField) noteField.value = actingNote ? actingNote.note : '';
 
   const dates = getPollWeekDates(currentPoll, pollWeekOffset);
   const navButtons = document.querySelectorAll('.poll-week-nav button');
@@ -2017,7 +2117,7 @@ function renderPollView() {
   document.getElementById('pollWeekLabel').textContent = `${formatDate(toIsoDate(dates[0]))} 〜 ${formatDate(toIsoDate(dates[dates.length - 1]))}`;
 
   const starts = getPollSlotStarts(currentPoll);
-  const myMemberId = currentProfile ? currentProfile.member_id : null;
+  const myMemberId = actingMemberId;
 
   let countMap = null;
   let namesMap = null;
@@ -2135,6 +2235,14 @@ function renderPollSuggestions() {
     ? days.map(day => `<li>${escapeHtml(formatDate(day.date))}　ピーク<strong>${day.peak}人</strong></li>`).join('')
     : '<li class="muted">まだ十分な回答がありません。</li>';
 
+  const notesWithText = currentPollNotes.filter(item => item.note.trim());
+  const noteHtml = notesWithText.length
+    ? notesWithText.map(item => {
+        const member = publicData.members.find(m => m.memberId === item.memberId);
+        return `<li><strong>${escapeHtml(member ? displayName(member) : '')}</strong>：${escapeHtml(item.note)}</li>`;
+      }).join('')
+    : '';
+
   box.innerHTML = `
     <div class="poll-suggestion-group">
       <h3>みんなが空いている時間帯 候補トップ3</h3>
@@ -2144,6 +2252,7 @@ function renderPollSuggestions() {
       <h3>参加可能人数が多い日 候補トップ3</h3>
       <ul>${dayHtml}</ul>
     </div>
+    ${noteHtml ? `<div class="poll-suggestion-group poll-suggestion-notes"><h3>メンバーからの備考</h3><ul>${noteHtml}</ul></div>` : ''}
   `;
 }
 
@@ -2212,9 +2321,9 @@ async function onPollCellUp() {
 
 async function commitPollDrag(drag) {
   if (!currentPoll) return;
-  const memberId = currentProfile ? currentProfile.member_id : null;
+  const memberId = getPollActingMemberId();
   if (!memberId) {
-    alert('メンバーに紐付いたアカウントでログインしてください。');
+    alert(isAdmin() ? '代理入力するメンバーを選択してください。' : 'メンバーに紐付いたアカウントでログインしてください。');
     renderPollView();
     return;
   }
