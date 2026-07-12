@@ -629,47 +629,11 @@ begin
 end;
 $$;
 
-insert into public.members (name, member_state, visible)
-select seed.name, seed.member_state, seed.visible
-from (
-  values
-    ('太郎', '在籍', true),
-    ('宇野', '在籍', true),
-    ('勝部', '在籍', true),
-    ('土師', '在籍', true),
-    ('時松', '在籍', true),
-    ('繁森', '在籍', true)
-) as seed(name, member_state, visible)
-where not exists (
-  select 1
-  from public.members
-  where public.members.name = seed.name
-);
-
-insert into public.list_options (option_type, label, sort_order)
-select seed.option_type, seed.label, seed.sort_order
-from (
-  values
-    ('event_category', '練習', 1),
-    ('event_category', '演奏', 2),
-    ('event_category', 'イベント', 3),
-    ('event_category', 'ミーティング', 4),
-    ('event_category', '準備', 5),
-    ('event_category', '本番', 6),
-    ('event_category', 'その他', 7),
-    ('reason_category', '体調不良', 1),
-    ('reason_category', '仕事', 2),
-    ('reason_category', '学校', 3),
-    ('reason_category', '私用', 4),
-    ('reason_category', '時間変更', 5),
-    ('reason_category', 'その他', 6)
-) as seed(option_type, label, sort_order)
-where not exists (
-  select 1
-  from public.list_options
-  where public.list_options.option_type = seed.option_type
-    and public.list_options.label = seed.label
-);
+-- 初期セットアップ用のサンプルメンバー・サンプル分類の自動投入は廃止した。
+-- （本番データが入った後も、削除したはずのサンプルがこのSQLを再実行する
+-- たびに復活してしまい、都度消す手間が発生していたため）
+-- 初回セットアップ時にメンバーや分類が必要な場合は、アプリの管理画面
+-- （メンバー追加／分類管理）から手動で追加してください。
 
 -- 初回だけ実行：
 -- 1. Supabaseの Authentication > Users で管理者ユーザーを作成する
