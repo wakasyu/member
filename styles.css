@@ -213,12 +213,13 @@ textarea {
 
 .form-footer-links {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 6px;
+  justify-content: center;
+  margin-top: 12px;
 }
 
 .form-footer-links button {
-  font-size: 12px;
+  font-size: 14px;
+  text-decoration: underline;
 }
 
 .shell {
@@ -300,6 +301,12 @@ textarea {
   color: var(--muted);
 }
 
+.subtab-divider {
+  width: 1px;
+  margin: 4px 4px;
+  background: var(--border);
+}
+
 .tab.active,
 .subtab.active {
   background: var(--main-light);
@@ -318,6 +325,42 @@ textarea {
 }
 
 .toolbar > * {
+  min-width: 150px;
+}
+
+.filter-details {
+  width: 100%;
+}
+
+.filter-details summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--main);
+  padding: 6px 2px;
+  list-style: none;
+}
+
+.filter-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.filter-details summary::before {
+  content: "▸ ";
+}
+
+.filter-details[open] summary::before {
+  content: "▾ ";
+}
+
+.filter-details-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.filter-details-body > * {
   min-width: 150px;
 }
 
@@ -489,8 +532,8 @@ textarea {
 
 .members {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 6px;
   align-content: start;
 }
 
@@ -792,7 +835,11 @@ td.wrap {
 .top-hero-scrim {
   position: absolute;
   inset: 0;
-  background: rgba(8, 22, 45, .48);
+  /* 写真の明るさに関わらず文字が読めるよう、全体をやや暗くしたうえで
+     ヘッダー・タブが乗る上部と、パネルが乗る中央をさらに重点的に暗くする */
+  background:
+    linear-gradient(to bottom, rgba(4, 12, 28, .72) 0, rgba(4, 12, 28, .3) 140px, rgba(4, 12, 28, .3) 60%, rgba(4, 12, 28, .6) 100%),
+    rgba(6, 16, 34, .42);
 }
 
 body.top-active {
@@ -810,16 +857,17 @@ body.top-active .site-header .eyebrow,
 body.top-active .site-header h1,
 body.top-active .site-header .muted {
   color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .45);
 }
 
 body.top-active .header-actions button {
-  background: rgba(255, 255, 255, .14);
-  border-color: rgba(255, 255, 255, .4);
+  background: rgba(255, 255, 255, .16);
+  border-color: rgba(255, 255, 255, .45);
   color: #fff;
 }
 
 body.top-active .header-actions button:hover {
-  background: rgba(255, 255, 255, .24);
+  background: rgba(255, 255, 255, .26);
 }
 
 body.top-active .tabs {
@@ -827,18 +875,23 @@ body.top-active .tabs {
   border-color: transparent;
 }
 
+/* タブは非アクティブでも常に薄いピル背景を出し、写真の内容に関わらず
+   「押せるナビゲーション」だとひと目でわかるようにする */
 body.top-active .tab {
-  color: rgba(255, 255, 255, .82);
+  background: rgba(255, 255, 255, .14);
+  border-color: rgba(255, 255, 255, .3);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .35);
 }
 
 body.top-active .tab:hover {
-  background: rgba(255, 255, 255, .12);
-  border-color: transparent;
+  background: rgba(255, 255, 255, .22);
+  border-color: rgba(255, 255, 255, .4);
 }
 
 body.top-active .tab.active {
-  background: rgba(255, 255, 255, .22);
-  border-color: transparent;
+  background: rgba(255, 255, 255, .32);
+  border-color: rgba(255, 255, 255, .5);
   color: #fff;
 }
 
@@ -901,6 +954,16 @@ body.top-active .tab.active {
   color: rgba(255, 255, 255, .75);
 }
 
+.top-hero-stat.clickable {
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+
+.top-hero-stat.clickable:hover {
+  background: rgba(255, 255, 255, .2);
+  border-color: rgba(255, 255, 255, .4);
+}
+
 .top-hero-dots {
   display: flex;
   justify-content: center;
@@ -909,10 +972,11 @@ body.top-active .tab.active {
 }
 
 .top-hero-dots span {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, .4);
+  background: rgba(255, 255, 255, .55);
+  border: 1px solid rgba(255, 255, 255, .3);
 }
 
 .top-hero-dots span.active {
@@ -966,6 +1030,7 @@ body.top-active .tab.active {
   .header-actions button,
   .button-row button,
   .toolbar > *,
+  .filter-details-body > *,
   button.primary {
     width: 100%;
   }

@@ -102,25 +102,30 @@
           <option value="event">予定主体で見る</option>
           <option value="member">人主体で見る</option>
         </select>
-        <select id="yearFilter" onchange="renderPublic()"><option value="">すべての年</option></select>
-        <select id="monthFilter" onchange="renderPublic()"><option value="">すべての月</option></select>
         <select id="categoryFilter" onchange="renderPublic()"><option value="">すべての分類</option></select>
-        <span id="memberFilterWrap">
-          <select id="memberFilter" onchange="renderPublic()"><option value="">全メンバー</option></select>
-        </span>
-        <span id="statusFilterWrap">
-          <select id="statusFilter" onchange="renderPublic()">
-            <option value="">すべての回答状況</option>
-            <option value="参加">参加</option>
-            <option value="不参加">不参加</option>
-            <option value="未定">未定</option>
-            <option value="未回答">未回答</option>
-          </select>
-        </span>
-        <label class="inline-check"><input id="showPast" type="checkbox" onchange="renderPublic()"> 終了した予定を表示する</label>
-        <span id="showInactiveMembersWrap">
-          <label class="inline-check"><input id="showInactiveMembers" type="checkbox" onchange="renderPublic()"> 休会・退会・非表示メンバーも表示する</label>
-        </span>
+        <details class="filter-details">
+          <summary>詳細フィルタ</summary>
+          <div class="filter-details-body">
+            <select id="yearFilter" onchange="renderPublic()"><option value="">すべての年</option></select>
+            <select id="monthFilter" onchange="renderPublic()"><option value="">すべての月</option></select>
+            <span id="memberFilterWrap">
+              <select id="memberFilter" onchange="renderPublic()"><option value="">全メンバー</option></select>
+            </span>
+            <span id="statusFilterWrap">
+              <select id="statusFilter" onchange="renderPublic()">
+                <option value="">すべての回答状況</option>
+                <option value="参加">参加</option>
+                <option value="不参加">不参加</option>
+                <option value="未定">未定</option>
+                <option value="未回答">未回答</option>
+              </select>
+            </span>
+            <label class="inline-check"><input id="showPast" type="checkbox" onchange="renderPublic()"> 終了した予定を表示する</label>
+            <span id="showInactiveMembersWrap">
+              <label class="inline-check"><input id="showInactiveMembers" type="checkbox" onchange="renderPublic()"> 休会・退会・非表示メンバーも表示する</label>
+            </span>
+          </div>
+        </details>
       </section>
       <div id="publicStatus" class="status">読み込み中...</div>
       <main id="eventList"></main>
@@ -182,6 +187,7 @@
         <button class="subtab" type="button" data-admin-tab="eventList" onclick="switchAdminTab('eventList')">予定一覧</button>
         <button class="subtab" type="button" data-admin-tab="memberForm" onclick="switchAdminTab('memberForm')">メンバー追加</button>
         <button class="subtab" type="button" data-admin-tab="memberList" onclick="switchAdminTab('memberList')">メンバー一覧</button>
+        <span class="subtab-divider" aria-hidden="true"></span>
         <button class="subtab" type="button" data-admin-tab="logs" onclick="switchAdminTab('logs')">ログ</button>
         <button class="subtab" type="button" data-admin-tab="options" onclick="switchAdminTab('options')">分類管理</button>
         <button class="subtab" type="button" data-admin-tab="photos" onclick="switchAdminTab('photos')">トップ写真</button>
@@ -214,21 +220,31 @@
       <section class="panel admin-section" data-admin-section="memberForm">
         <h2>メンバー追加・編集</h2>
         <input id="memberId" type="hidden">
+
+        <div class="panel-head"><h3>基本情報</h3></div>
         <div class="grid4">
           <label>名前（フルネーム）<input id="memberName" type="text"></label>
           <label>表示名（苗字など・空欄なら氏名を使用）<input id="shortName" type="text" placeholder="例：山田"></label>
           <label>学年<input id="grade" type="text"></label>
-          <label>生年月日<input id="birthDate" type="date"></label>
           <label>電話番号<input id="contact" type="tel" placeholder="090-1234-5678"></label>
+        </div>
+
+        <div class="panel-head"><h3>在籍状況</h3></div>
+        <div class="grid4">
+          <label>生年月日<input id="birthDate" type="date"></label>
           <label>入会日<input id="joinDate" type="date"></label>
           <label>退会日<input id="leaveDate" type="date"></label>
           <label>在籍状態<select id="memberState"><option value="在籍">在籍</option><option value="休会">休会</option><option value="退会">退会</option></select></label>
           <label>現役名簿に表示<select id="visible"><option value="true">表示する</option><option value="false">表示しない</option></select></label>
+        </div>
+        <p class="muted">「在籍状態」を退会にすると、退会日と現役名簿の非表示が自動で設定されます。過去の出欠履歴は消えません。</p>
+
+        <div class="panel-head"><h3>装備・担当</h3></div>
+        <div class="grid3">
           <label>衣装サイズ<input id="costumeSize" type="text"></label>
           <label>Tシャツサイズ<input id="tshirtSize" type="text"></label>
           <label>担当<input id="duty" type="text"></label>
         </div>
-        <p class="muted">「在籍状態」を退会にすると、退会日と現役名簿の非表示が自動で設定されます。過去の出欠履歴は消えません。</p>
         <label class="wide-field">備考<textarea id="memberNote"></textarea></label>
         <div class="button-row">
           <button id="saveMemberButton" class="primary" type="button" onclick="saveMemberForm()">メンバーを保存</button>
@@ -245,6 +261,7 @@
 
       <section class="panel admin-section" data-admin-section="memberList">
         <h2>メンバー一覧</h2>
+        <label class="inline-check"><input id="showAllMemberColumns" type="checkbox" onchange="renderAdminMembers()"> すべての項目を表示する（表示名・生年月日・入退会日・サイズ・備考）</label>
         <div id="adminMembers"></div>
       </section>
 

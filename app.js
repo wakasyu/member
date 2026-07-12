@@ -646,7 +646,7 @@ function populateAnswerEventSelect() {
     .filter(event => event.publicState !== '削除')
     .filter(event => isAdmin() || !memberId || (event.answers || []).some(answer => answer.memberId === memberId))
     .sort(compareEvents);
-  fillSelect('answerEventSelect', events.map(event => ({ value: event.answerToken, label: `${formatDate(event.date)} ${event.eventName}` })), '予定を選択してください');
+  fillSelect('answerEventSelect', events.map(event => ({ value: event.answerToken, label: `[${event.category || 'その他'}] ${formatDate(event.date)} ${event.eventName}` })), '予定を選択してください');
   if (answerData && answerData.event) select.value = answerData.event.answerToken;
   select.onchange = () => {
     if (select.value) openAnswerInApp(select.value);
@@ -701,6 +701,7 @@ function renderAnswerPage() {
   const memberId = getEffectiveMemberId();
   const isEligible = Boolean(memberId) && answerData.members.some(member => member.memberId === memberId);
   const fieldsBox = document.getElementById('answerFormFields');
+  document.getElementById('answerStatus').classList.remove('notice');
 
   if (!memberId) {
     fieldsBox.classList.add('hidden');
@@ -717,8 +718,10 @@ function renderAnswerPage() {
 
   fieldsBox.classList.remove('hidden');
   const locked = isAnswerLocked(event);
-  document.getElementById('answerStatus').textContent = locked
-    ? `回答期限（${formatDate(event.answerDeadline)}）を過ぎているため、回答できません。変更が必要な場合は管理者に連絡してください。`
+  const statusBox = document.getElementById('answerStatus');
+  statusBox.classList.toggle('notice', locked);
+  statusBox.textContent = locked
+    ? `回答期限（${formatDate(event.answerDeadline)}）を過ぎているため、回答を送信・変更できません。内容を直したい場合は管理者に連絡してください。`
     : 'この予定への出欠を回答できます。';
 
   const answer = (answerData.answers || []).find(item => item.memberId === memberId);
@@ -928,31 +931,38 @@ function renderAdminEvents() {
 }
 
 function renderAdminMembers() {
+  const showAllCheckbox = document.getElementById('showAllMemberColumns');
+  const showAll = showAllCheckbox ? showAllCheckbox.checked : false;
   const rows = publicData.members.map(member => {
     const age = computeAge(member.birthDate);
     const birthDateHtml = member.birthDate
       ? `${escapeHtml(formatDate(member.birthDate))}${age !== null ? `<span class="muted"> (${age}歳)</span>` : ''}`
       : '';
+    const detailCells = showAll ? `
+      <td>${escapeHtml(member.shortName || '')}</td>
+      <td>${birthDateHtml}</td>
+      <td>${escapeHtml(member.joinDate ? formatDate(member.joinDate) : '')}</td>
+      <td>${escapeHtml(member.leaveDate ? formatDate(member.leaveDate) : '')}</td>
+      <td>${escapeHtml(member.costumeSize || '')}</td>
+      <td>${escapeHtml(member.tshirtSize || '')}</td>
+      <td class="wrap">${escapeHtml(member.note || '')}</td>
+    ` : '';
     return `
     <tr>
       <td>${escapeHtml(member.visible ? '表示' : '非表示')}</td>
       <td>${escapeHtml(member.memberState)}</td>
       <td>${escapeHtml(member.name)}</td>
-      <td>${escapeHtml(member.shortName || '')}</td>
       <td>${escapeHtml(member.grade)}</td>
-      <td>${birthDateHtml}</td>
       <td class="wrap">${escapeHtml(member.contact || '')}</td>
-      <td>${escapeHtml(member.joinDate ? formatDate(member.joinDate) : '')}</td>
-      <td>${escapeHtml(member.leaveDate ? formatDate(member.leaveDate) : '')}</td>
-      <td>${escapeHtml(member.costumeSize || '')}</td>
-      <td>${escapeHtml(member.tshirtSize || '')}</td>
       <td>${escapeHtml(member.duty || '')}</td>
-      <td class="wrap">${escapeHtml(member.note || '')}</td>
+      ${detailCells}
       <td><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button></td>
     </tr>
   `;
   }).join('');
-  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>表示</th><th>状態</th><th>氏名</th><th>表示名</th><th>学年</th><th>生年月日</th><th>電話番号</th><th>入会日</th><th>退会日</th><th>衣装</th><th>Tシャツ</th><th>担当</th><th>備考</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="14">メンバーがいません。</td></tr>'}</tbody></table></div>`;
+  const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>衣装</th><th>Tシャツ</th><th>備考</th>' : '';
+  const colCount = showAll ? 14 : 7;
+  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
 }
 
 async function renderAdminLogs() {
@@ -1318,20 +1328,27 @@ function renderTopHighlights() {
     .filter(event => event.publicState !== '削除' && !isPastEvent(event))
     .sort(compareEvents);
   const next = upcoming[0];
+  nextBox.classList.toggle('clickable', Boolean(next));
+  nextBox.onclick = next ? () => switchView('public') : null;
   nextBox.innerHTML = next
     ? `<p class="muted" style="margin:0 0 4px;font-size:12px;">次の予定</p><p style="margin:0 0 4px;font-size:15px;font-weight:900;">${escapeHtml(next.eventName)}</p><p class="muted" style="margin:0;font-size:13px;">${escapeHtml(formatDate(next.date))}${next.startTime ? escapeHtml(' ' + next.startTime + '〜') : ''}</p>`
     : `<p class="muted" style="margin:0 0 4px;font-size:12px;">次の予定</p><p style="margin:0;font-size:14px;">予定はまだありません</p>`;
 
   const memberId = currentProfile ? currentProfile.member_id : null;
   if (memberId) {
-    const pendingCount = upcoming.filter(event => {
+    const pendingEvents = upcoming.filter(event => {
       const answer = findAnswerForMember(event, memberId);
       return answer && answer.status === '未回答';
-    }).length;
+    });
+    const pendingCount = pendingEvents.length;
+    pendingBox.classList.toggle('clickable', pendingCount > 0);
+    pendingBox.onclick = pendingCount ? () => openAnswerInApp(pendingEvents[0].answerToken) : null;
     pendingBox.innerHTML = pendingCount
       ? `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0 0 4px;font-size:15px;font-weight:900;">未回答が${pendingCount}件あります</p><span class="badge pending">要回答</span>`
       : `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0;font-size:14px;">未回答はありません</p>`;
   } else {
+    pendingBox.classList.remove('clickable');
+    pendingBox.onclick = null;
     pendingBox.innerHTML = `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0;font-size:13px;">アカウントがメンバーに紐付けられていません</p>`;
   }
 }
