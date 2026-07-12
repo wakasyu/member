@@ -15,7 +15,36 @@ const messageTimers = new Map();
 
 document.addEventListener('DOMContentLoaded', initializeApp);
 
+// logo.jpgはInstagramアイコン用の正方形画像（白背景に丸いデザイン）のため、
+// ブラウザのタブアイコン（favicon）は画像そのままだと四角く白い余白が出てしまう。
+// faviconはCSSで加工できないため、canvasで丸くくり抜いた画像を生成してから設定する。
+function setCircularFavicon(src) {
+  const img = new Image();
+  img.onload = () => {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(img, 0, 0, size, size);
+    let link = document.querySelector('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.type = 'image/png';
+    link.href = canvas.toDataURL('image/png');
+  };
+  img.src = src;
+}
+
 async function initializeApp() {
+  setCircularFavicon('./logo.jpg');
   const config = window.WAKASHU_CONFIG || {};
   if (!config.supabaseUrl || !config.supabaseAnonKey || config.supabaseUrl.includes('YOUR_PROJECT_ID')) {
     document.getElementById('configWarning').classList.remove('hidden');
@@ -241,16 +270,39 @@ async function removeOption(id) {
   refreshCategorySelects();
 }
 
-function renderOptionManager() {
-  renderOptionGroup('eventCategoryOptions', categoryOptions);
-  renderOptionGroup('reasonCategoryOptions', reasonCategoryOptions);
+async function renameOption(id, type, currentLabel) {
+  if (!isAdmin()) return;
+  const input = prompt('新しい名称を入力してください', currentLabel);
+  if (input === null) return;
+  const label = input.trim();
+  if (!label || label === currentLabel) return;
+  const { error } = await supabaseClient.from('list_options').update({ label }).eq('id', id);
+  if (error) {
+    showMessage('optionMessage', error.message, false);
+    return;
+  }
+  // 既存の予定・回答に保存済みの旧名称も新名称に合わせて更新する
+  if (type === 'event_category') {
+    await supabaseClient.from('events').update({ category: label }).eq('category', currentLabel);
+  } else {
+    await supabaseClient.from('answers').update({ reason_category: label }).eq('reason_category', currentLabel);
+  }
+  await loadOptions();
+  await refreshAll();
+  renderOptionManager();
+  refreshCategorySelects();
 }
 
-function renderOptionGroup(containerId, options) {
+function renderOptionManager() {
+  renderOptionGroup('eventCategoryOptions', categoryOptions, 'event_category');
+  renderOptionGroup('reasonCategoryOptions', reasonCategoryOptions, 'reason_category');
+}
+
+function renderOptionGroup(containerId, options, type) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = options.length
-    ? options.map(option => `<span class="option-chip">${escapeHtml(option.label)}<button type="button" data-remove-option="${escapeAttr(option.id)}" title="削除">×</button></span>`).join('')
+    ? options.map(option => `<span class="option-chip">${escapeHtml(option.label)}<button type="button" data-edit-option="${escapeAttr(option.id)}" data-edit-option-type="${escapeAttr(type)}" data-edit-option-label="${escapeAttr(option.label)}" title="名称変更">✎</button><button type="button" data-remove-option="${escapeAttr(option.id)}" title="削除">×</button></span>`).join('')
     : '<span class="muted">まだ選択肢がありません。</span>';
 }
 
@@ -470,6 +522,10 @@ function createEventRowHtml(event) {
 
   const countsHtml = STATUS_LIST.map(status => `<span class="badge ${statusClass(status)}">${escapeHtml(status)} ${Number(event.counts && event.counts[status] || 0)}</span>`).join('');
 
+  const myMemberId = currentProfile ? currentProfile.member_id : null;
+  const myAnswer = myMemberId ? findAnswerForMember(event, myMemberId) : null;
+  const answerLabel = myAnswer && myAnswer.status !== '未回答' ? '予定を変更する' : '回答する';
+
   return `
     <article class="event-row">
       <div class="event-row-top">
@@ -482,7 +538,7 @@ function createEventRowHtml(event) {
           ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
         </div>
         <div class="share-actions">
-          <button type="button" data-open-answer="${escapeAttr(event.answerToken)}">日程調整リンク</button>
+          <button type="button" data-open-answer="${escapeAttr(event.answerToken)}">${escapeHtml(answerLabel)}</button>
           <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
         </div>
       </div>
@@ -898,9 +954,11 @@ function handleAdminEventsClick(domEvent) {
 
 function handleAdminMembersClick(domEvent) {
   const editButton = domEvent.target.closest('[data-edit-member]');
+  const deleteButton = domEvent.target.closest('[data-delete-member]');
   const upButton = domEvent.target.closest('[data-move-member-up]');
   const downButton = domEvent.target.closest('[data-move-member-down]');
   if (editButton) editMember(editButton.dataset.editMember);
+  else if (deleteButton) deleteMember(deleteButton.dataset.deleteMember);
   else if (upButton) moveMember(upButton.dataset.moveMemberUp, 'up');
   else if (downButton) moveMember(downButton.dataset.moveMemberDown, 'down');
 }
@@ -913,8 +971,10 @@ function handlePublicListClick(domEvent) {
 }
 
 function handleOptionRemoveClick(domEvent) {
+  const editButton = domEvent.target.closest('[data-edit-option]');
   const removeButton = domEvent.target.closest('[data-remove-option]');
-  if (removeButton) removeOption(removeButton.dataset.removeOption);
+  if (editButton) renameOption(editButton.dataset.editOption, editButton.dataset.editOptionType, editButton.dataset.editOptionLabel);
+  else if (removeButton) removeOption(removeButton.dataset.removeOption);
 }
 
 function renderAdmin() {
@@ -981,13 +1041,29 @@ function renderAdminMembers() {
       <td class="wrap" data-label="電話番号">${escapeHtml(member.contact || '')}</td>
       <td data-label="担当">${escapeHtml(member.duty || '')}</td>
       ${detailCells}
-      <td data-label="操作"><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button></td>
+      <td data-label="操作"><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button> <button type="button" class="danger" data-delete-member="${escapeAttr(member.memberId)}">削除</button></td>
     </tr>
   `;
   }).join('');
   const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>衣装</th><th>Tシャツ</th><th>備考</th>' : '';
   const colCount = showAll ? 15 : 8;
   document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
+}
+
+async function deleteMember(memberId) {
+  if (!isAdmin()) return;
+  const member = publicData.members.find(item => item.memberId === memberId);
+  if (!member) return;
+  if (!confirm(`「${member.name}」を削除します。この人の回答履歴も一緒に削除され、元に戻せません。よろしいですか？`)) return;
+  // 万一この人にログインアカウントが紐付いていた場合、参照が残らないようにしておく
+  await supabaseClient.from('profiles').update({ member_id: null }).eq('member_id', memberId);
+  const { error } = await supabaseClient.from('members').delete().eq('id', memberId);
+  if (error) {
+    alert(error.message);
+    return;
+  }
+  await appendLog('メンバー削除', '', '', memberId, member.name, '', '', '');
+  await refreshAll();
 }
 
 async function moveMember(memberId, direction) {
