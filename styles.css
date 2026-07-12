@@ -173,7 +173,7 @@ textarea {
   display: grid;
   place-items: center;
   margin-bottom: 16px;
-  border-radius: 10px;
+  border-radius: 50%;
   background: var(--main);
   color: #fff;
   font-weight: 900;
@@ -250,7 +250,7 @@ textarea {
   flex-shrink: 0;
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
   background: var(--main);
@@ -1073,7 +1073,7 @@ body.top-active .tab.active {
   width: 56px;
   height: 56px;
   margin: 0 auto;
-  border-radius: 12px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
   background: rgba(255, 255, 255, .18);
