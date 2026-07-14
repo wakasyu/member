@@ -107,6 +107,35 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
+-- 「スタッフ」役割（政/お手伝いなど、若衆メンバー以外の限定アカウント）を追加。
+-- 予定一覧の閲覧と予定追加だけができ、それ以外（メンバー管理・出欠閲覧の詳細等）は
+-- is_admin()を要求する既存ポリシーのままなので操作できない。
+do $$
+declare
+  con_name text;
+begin
+  select conname into con_name
+  from pg_constraint
+  where conrelid = 'public.profiles'::regclass
+    and contype = 'c'
+    and pg_get_constraintdef(oid) ilike '%role%'
+    and pg_get_constraintdef(oid) not ilike '%staff%'
+  limit 1;
+  if con_name is not null then
+    execute format('alter table public.profiles drop constraint %I', con_name);
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.profiles'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%role%'
+      and pg_get_constraintdef(oid) ilike '%staff%'
+  ) then
+    alter table public.profiles add constraint profiles_role_check check (role in ('admin', 'member', 'staff'));
+  end if;
+end;
+$$;
+
 create table if not exists public.members (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -323,6 +352,21 @@ as $$
   );
 $$;
 
+create or replace function public.is_staff()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role = 'staff'
+  );
+$$;
+
 -- roleとmember_idは権限に直結するため、アプリ経由（PostgREST + 一般ユーザーのJWT）で
 -- 管理者以外が書き換えられないようDBレベルで防ぐ。
 -- (RLSのwith checkだけだと「自分の行を更新できる」ことしか保証できず、
@@ -413,6 +457,13 @@ on public.events for all
 to authenticated
 using (public.is_admin())
 with check (public.is_admin());
+
+-- スタッフは新しい予定の追加だけできる（編集・削除・対象メンバー変更は不可）
+drop policy if exists "events insert staff" on public.events;
+create policy "events insert staff"
+on public.events for insert
+to authenticated
+with check (public.is_staff());
 
 alter table public.event_target_members enable row level security;
 

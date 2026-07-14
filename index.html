@@ -30,7 +30,19 @@
       </form>
       <div class="form-footer-links">
         <button id="forgotPasswordButton" class="link-button" type="button">パスワードをお忘れですか？</button>
+        <button id="staffLoginToggle" class="link-button" type="button" onclick="toggleStaffLoginForm()">スタッフとしてログイン</button>
       </div>
+      <form id="staffLoginForm" class="form-stack hidden">
+        <label>
+          お名前（予定追加時の「作成者」に使われます）
+          <input id="staffName" type="text" required>
+        </label>
+        <label>
+          共通パスワード
+          <input id="staffPassword" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="primary" type="submit">スタッフとしてログイン</button>
+      </form>
       <div id="loginMessage" class="message"></div>
     </section>
   </div>
@@ -125,6 +137,7 @@
       <button class="tab" type="button" data-tab="public" onclick="switchView('public')">予定一覧</button>
       <button class="tab" type="button" data-tab="answer" onclick="switchView('answer')">日程調整回答</button>
       <button class="tab" type="button" data-tab="poll" onclick="switchView('poll')">候補日程調整</button>
+      <button id="eventFormTabButton" class="tab hidden" type="button" data-tab="eventForm" onclick="switchView('eventForm')">予定追加</button>
       <button id="adminTabButton" class="tab hidden" type="button" data-tab="admin" onclick="switchView('admin')">管理</button>
     </nav>
 
@@ -268,20 +281,8 @@
       </section>
     </section>
 
-    <section id="adminView" class="view">
-      <nav class="subtabs">
-        <button class="subtab active" type="button" data-admin-tab="eventForm" onclick="switchAdminTab('eventForm')">予定追加</button>
-        <button class="subtab" type="button" data-admin-tab="eventList" onclick="switchAdminTab('eventList')">予定一覧</button>
-        <button class="subtab" type="button" data-admin-tab="memberForm" onclick="switchAdminTab('memberForm')">メンバー追加</button>
-        <button class="subtab" type="button" data-admin-tab="memberList" onclick="switchAdminTab('memberList')">メンバー一覧</button>
-        <span class="subtab-divider" aria-hidden="true"></span>
-        <button class="subtab" type="button" data-admin-tab="logs" onclick="switchAdminTab('logs')">ログ</button>
-        <button class="subtab" type="button" data-admin-tab="options" onclick="switchAdminTab('options')">分類管理</button>
-        <button class="subtab" type="button" data-admin-tab="photos" onclick="switchAdminTab('photos')">トップ写真</button>
-        <button class="subtab" type="button" data-admin-tab="polls" onclick="switchAdminTab('polls')">候補日程調整</button>
-      </nav>
-
-      <section class="panel admin-section active" data-admin-section="eventForm">
+    <section id="eventFormView" class="view">
+      <section class="panel">
         <h2>予定追加・編集</h2>
         <p class="muted">予定を保存すると、その予定専用の日程調整リンクが自動発行されます。</p>
         <input id="eventId" type="hidden">
@@ -303,10 +304,12 @@
         </div>
         <label class="wide-field">備考<textarea id="eventNote"></textarea></label>
 
-        <div class="panel-head"><h3>対象メンバー・出欠の事前入力</h3></div>
-        <label class="inline-check"><input id="eventLimitTargets" type="checkbox" onchange="renderEventTargetMemberList()"> 対象メンバーを絞る（未チェックなら在籍期間から自動判定）</label>
-        <p class="muted">対象メンバーごとに、その場で出欠を入力しておくこともできます（あとから通常の回答でも変更できます）。</p>
-        <div id="eventTargetMemberList" class="event-target-list"></div>
+        <div id="eventTargetSection" class="hidden">
+          <div class="panel-head"><h3>対象メンバー・出欠の事前入力</h3></div>
+          <label class="inline-check"><input id="eventLimitTargets" type="checkbox" onchange="renderEventTargetMemberList()"> 対象メンバーを絞る（未チェックなら在籍期間から自動判定）</label>
+          <p class="muted">対象メンバーごとに、その場で出欠を入力しておくこともできます（あとから通常の回答でも変更できます）。</p>
+          <div id="eventTargetMemberList" class="event-target-list"></div>
+        </div>
 
         <div class="button-row">
           <button id="saveEventButton" class="primary" type="button" onclick="saveEventForm()">予定を保存</button>
@@ -314,6 +317,19 @@
         </div>
         <div id="eventMessage" class="message"></div>
       </section>
+    </section>
+
+    <section id="adminView" class="view">
+      <nav class="subtabs">
+        <button class="subtab active" type="button" data-admin-tab="eventList" onclick="switchAdminTab('eventList')">予定一覧</button>
+        <button class="subtab" type="button" data-admin-tab="memberForm" onclick="switchAdminTab('memberForm')">メンバー追加</button>
+        <button class="subtab" type="button" data-admin-tab="memberList" onclick="switchAdminTab('memberList')">メンバー一覧</button>
+        <span class="subtab-divider" aria-hidden="true"></span>
+        <button class="subtab" type="button" data-admin-tab="logs" onclick="switchAdminTab('logs')">ログ</button>
+        <button class="subtab" type="button" data-admin-tab="options" onclick="switchAdminTab('options')">分類管理</button>
+        <button class="subtab" type="button" data-admin-tab="photos" onclick="switchAdminTab('photos')">トップ写真</button>
+        <button class="subtab" type="button" data-admin-tab="polls" onclick="switchAdminTab('polls')">候補日程調整</button>
+      </nav>
 
       <section class="panel admin-section" data-admin-section="memberForm">
         <h2>メンバー追加・編集</h2>
@@ -358,7 +374,7 @@
         <div id="memberMessage" class="message"></div>
       </section>
 
-      <section class="panel admin-section" data-admin-section="eventList">
+      <section class="panel admin-section active" data-admin-section="eventList">
         <h2>予定一覧・日程調整リンク</h2>
         <label class="inline-check"><input id="showArchivedEvents" type="checkbox" onchange="renderAdminEvents()"> 削除済みも表示する</label>
         <div id="adminEvents"></div>

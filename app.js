@@ -12,6 +12,8 @@ let realtimeChannel = null;
 let refreshTimer = null;
 let adminTablesBound = false;
 const messageTimers = new Map();
+const STAFF_LOGIN_EMAIL = 'staff@wakasyu.local';
+let staffDisplayName = sessionStorage.getItem('staffDisplayName') || '';
 
 let eventFormTargetMemberIds = null;
 let eventFormPreAnswers = {};
@@ -72,6 +74,7 @@ async function initializeApp() {
   document.getElementById('forgotPasswordButton').addEventListener('click', requestPasswordReset);
   document.getElementById('passwordResetForm').addEventListener('submit', submitNewPassword);
   document.getElementById('registerForm').addEventListener('submit', submitRegisterForm);
+  document.getElementById('staffLoginForm').addEventListener('submit', handleStaffLogin);
 
   // Supabaseのメールリンクの形式（#access_token=...&type=recovery か ?code=...）に
   // 依存せず確実に拾えるよう、URLの文字列チェックに加えてSDK側のイベントでも検知する。
@@ -112,6 +115,31 @@ async function handleLogin(event) {
     return;
   }
 
+  await enterApp(data.user);
+}
+
+function toggleStaffLoginForm() {
+  document.getElementById('staffLoginForm').classList.toggle('hidden');
+}
+
+async function handleStaffLogin(event) {
+  event.preventDefault();
+  const name = document.getElementById('staffName').value.trim();
+  const password = document.getElementById('staffPassword').value;
+  if (!name) {
+    showMessage('loginMessage', 'お名前を入力してください。', false);
+    return;
+  }
+  showMessage('loginMessage', 'ログイン中...', true);
+
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email: STAFF_LOGIN_EMAIL, password });
+  if (error) {
+    showMessage('loginMessage', `ログインに失敗しました：${error.message}`, false);
+    return;
+  }
+
+  staffDisplayName = name;
+  sessionStorage.setItem('staffDisplayName', name);
   await enterApp(data.user);
 }
 
@@ -240,10 +268,17 @@ async function enterApp(user) {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('passwordResetScreen').classList.add('hidden');
   document.getElementById('appShell').classList.remove('hidden');
-  document.getElementById('userMeta').textContent = `${currentProfile.display_name || user.email} / ${isAdmin() ? '管理者' : 'メンバー'}`;
+  const roleLabel = isAdmin() ? '管理者' : isStaff() ? 'スタッフ' : 'メンバー';
+  const displayLabel = isStaff() ? (staffDisplayName || 'スタッフ') : (currentProfile.display_name || user.email);
+  document.getElementById('userMeta').textContent = `${displayLabel} / ${roleLabel}`;
   document.getElementById('adminTabButton').classList.toggle('hidden', !isAdmin());
-  switchView('top');
-  initTopHero();
+  document.getElementById('eventFormTabButton').classList.toggle('hidden', !(isAdmin() || isStaff()));
+  ['top', 'answer', 'poll'].forEach(name => {
+    const tabButton = document.querySelector(`.tab[data-tab="${name}"]`);
+    if (tabButton) tabButton.classList.toggle('hidden', isStaff());
+  });
+  switchView(isStaff() ? 'public' : 'top');
+  if (!isStaff()) initTopHero();
   await loadOptions();
   setupAdminForms();
   setupAdminTables();
@@ -272,11 +307,21 @@ function isAdmin() {
   return currentProfile && currentProfile.role === 'admin';
 }
 
+function isStaff() {
+  return currentProfile && currentProfile.role === 'staff';
+}
+
+function getDefaultCreatorName() {
+  if (isStaff()) return staffDisplayName || '';
+  return currentProfile ? (currentProfile.display_name || '') : '';
+}
+
 async function signOut() {
   if (realtimeChannel) {
     supabaseClient.removeChannel(realtimeChannel);
     realtimeChannel = null;
   }
+  sessionStorage.removeItem('staffDisplayName');
   await supabaseClient.auth.signOut();
   location.reload();
 }
@@ -1065,7 +1110,7 @@ function updatePendingVisibility() {
 
 function setupAdminForms() {
   fillSelect('eventCategory', categoryOptions.map(option => option.label), '分類を選択');
-  document.getElementById('creator').value = currentProfile ? (currentProfile.display_name || '') : '';
+  document.getElementById('creator').value = getDefaultCreatorName();
 
   const memberStateSelect = document.getElementById('memberState');
   if (memberStateSelect && !memberStateSelect.dataset.bound) {
@@ -1087,6 +1132,7 @@ function setupAdminTables() {
   document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
   document.getElementById('adminPolls').addEventListener('click', handleAdminPollsClick);
   ['startTimeHour', 'startTimeMinute', 'endTimeHour', 'endTimeMinute'].forEach(id => populateTimeSelect(document.getElementById(id)));
+  document.getElementById('eventTargetSection').classList.toggle('hidden', !isAdmin());
   renderEventTargetMemberList();
 }
 
@@ -1360,7 +1406,7 @@ async function renderAdminLogs() {
 }
 
 async function saveEventForm() {
-  if (!isAdmin()) return;
+  if (!isAdmin() && !isStaff()) return;
   const eventId = document.getElementById('eventId').value || crypto.randomUUID();
   const token = document.getElementById('eventToken').value || createToken();
   const eventName = document.getElementById('eventName').value.trim();
@@ -1398,27 +1444,29 @@ async function saveEventForm() {
     return;
   }
 
-  const limitTargets = document.getElementById('eventLimitTargets').checked;
-  await supabaseClient.from('event_target_members').delete().eq('event_id', eventId);
-  let targetMemberIds = publicData.members.map(member => member.memberId);
-  if (limitTargets) {
-    const checked = Array.from(document.querySelectorAll('#eventTargetMemberList [data-target-member]:checked')).map(el => el.dataset.targetMember);
-    targetMemberIds = checked;
-    if (checked.length) {
-      await supabaseClient.from('event_target_members').insert(checked.map(memberId => ({ event_id: eventId, member_id: memberId })));
+  if (isAdmin()) {
+    const limitTargets = document.getElementById('eventLimitTargets').checked;
+    await supabaseClient.from('event_target_members').delete().eq('event_id', eventId);
+    let targetMemberIds = publicData.members.map(member => member.memberId);
+    if (limitTargets) {
+      const checked = Array.from(document.querySelectorAll('#eventTargetMemberList [data-target-member]:checked')).map(el => el.dataset.targetMember);
+      targetMemberIds = checked;
+      if (checked.length) {
+        await supabaseClient.from('event_target_members').insert(checked.map(memberId => ({ event_id: eventId, member_id: memberId })));
+      }
     }
-  }
 
-  const preAnswerEntries = Array.from(document.querySelectorAll('#eventTargetMemberList [data-preanswer-member]'))
-    .map(select => ({ memberId: select.dataset.preanswerMember, status: select.value }))
-    .filter(entry => entry.status && targetMemberIds.includes(entry.memberId));
-  for (const entry of preAnswerEntries) {
-    await supabaseClient.from('answers').upsert({
-      event_id: eventId,
-      member_id: entry.memberId,
-      status: entry.status,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'event_id,member_id' });
+    const preAnswerEntries = Array.from(document.querySelectorAll('#eventTargetMemberList [data-preanswer-member]'))
+      .map(select => ({ memberId: select.dataset.preanswerMember, status: select.value }))
+      .filter(entry => entry.status && targetMemberIds.includes(entry.memberId));
+    for (const entry of preAnswerEntries) {
+      await supabaseClient.from('answers').upsert({
+        event_id: eventId,
+        member_id: entry.memberId,
+        status: entry.status,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'event_id,member_id' });
+    }
   }
 
   restore();
@@ -1431,7 +1479,7 @@ async function saveEventForm() {
 function editEvent(eventId) {
   const event = publicData.events.find(item => item.eventId === eventId);
   if (!event) return;
-  switchAdminTab('eventForm');
+  switchView('eventForm');
   document.getElementById('eventId').value = event.eventId || '';
   document.getElementById('eventToken').value = event.answerToken || '';
   document.getElementById('eventName').value = event.eventName || '';
@@ -1488,7 +1536,7 @@ function clearEventForm() {
   setTimeSelectValue('startTime', '');
   setTimeSelectValue('endTime', '');
   document.getElementById('eventCategory').value = '';
-  document.getElementById('creator').value = currentProfile ? (currentProfile.display_name || '') : '';
+  document.getElementById('creator').value = getDefaultCreatorName();
   document.getElementById('eventLimitTargets').checked = false;
   eventFormTargetMemberIds = null;
   eventFormPreAnswers = {};
@@ -1671,6 +1719,8 @@ async function appendLog(action, eventId, eventName, memberId, memberName, oldSt
 
 function switchView(name) {
   if (name === 'admin' && !isAdmin()) return;
+  if (name === 'eventForm' && !isAdmin() && !isStaff()) return;
+  if (isStaff() && ['top', 'answer', 'poll'].includes(name)) return;
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
   document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
   document.getElementById(`${name}View`).classList.add('active');
