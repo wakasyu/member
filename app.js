@@ -26,6 +26,7 @@ let pollDrag = null;
 let pollViewInitialized = false;
 let pollRefreshTimer = null;
 let pollActingMemberId = '';
+let pollPendingChanges = new Map();
 
 document.addEventListener('DOMContentLoaded', initializeApp);
 
@@ -2143,6 +2144,10 @@ function renderPollSelect() {
 async function onPollSelectChange() {
   const select = document.getElementById('pollSelect');
   const pollId = select.value;
+  if (!discardPendingPollChangesIfConfirmed()) {
+    select.value = currentPoll ? currentPoll.pollId : '';
+    return;
+  }
   if (!pollId) {
     currentPoll = null;
     document.getElementById('pollBox').classList.add('hidden');
@@ -2161,6 +2166,7 @@ async function onPollSelectChange() {
   await loadPollSlots(pollId);
   await loadPollNotes(pollId);
   renderPollView();
+  updatePollPendingIndicator();
 }
 
 function setupPollActingMemberSelect() {
@@ -2176,7 +2182,12 @@ function setupPollActingMemberSelect() {
 }
 
 function onPollActingMemberChange() {
-  pollActingMemberId = document.getElementById('pollActingMemberSelect').value;
+  const select = document.getElementById('pollActingMemberSelect');
+  if (!discardPendingPollChangesIfConfirmed()) {
+    select.value = pollActingMemberId || '';
+    return;
+  }
+  pollActingMemberId = select.value;
   renderPollView();
 }
 
@@ -2237,8 +2248,10 @@ async function resetPollSelection() {
     alert(error.message);
     return;
   }
+  pollPendingChanges.clear();
   await loadPollSlots(currentPoll.pollId);
   renderPollView();
+  updatePollPendingIndicator();
 }
 
 function toIsoDate(date) {
@@ -2357,6 +2370,10 @@ function renderPollView() {
   const mySelectedKeys = new Set(
     myMemberId ? currentPollSlots.filter(slot => slot.memberId === myMemberId).map(slot => `${slot.date}_${slot.start}`) : []
   );
+  pollPendingChanges.forEach((change, key) => {
+    if (change.add) mySelectedKeys.add(key);
+    else mySelectedKeys.delete(key);
+  });
 
   const headerCells = dates.map(d => {
     const label = `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
@@ -2535,32 +2552,55 @@ function onPollCellTouchMove(domEvent) {
   applyPollDragToCell(cell);
 }
 
-async function onPollCellUp() {
+function onPollCellUp() {
   if (!pollDrag) return;
   const drag = pollDrag;
   pollDrag = null;
   if (!drag.keys.size) return;
-  await commitPollDrag(drag);
+  drag.keys.forEach(key => {
+    pollPendingChanges.set(key, { add: drag.add });
+  });
+  renderPollView();
+  updatePollPendingIndicator();
 }
 
-async function commitPollDrag(drag) {
-  if (!currentPoll) return;
+function updatePollPendingIndicator() {
+  const indicator = document.getElementById('pollPendingIndicator');
+  const button = document.getElementById('pollCommitButton');
+  if (!indicator || !button) return;
+  const count = pollPendingChanges.size;
+  indicator.textContent = count ? `未保存の変更が${count}件あります` : '';
+  button.disabled = count === 0;
+}
+
+function discardPendingPollChangesIfConfirmed() {
+  if (!pollPendingChanges.size) return true;
+  if (!confirm('保存されていない変更があります。破棄して続けますか？')) return false;
+  pollPendingChanges.clear();
+  updatePollPendingIndicator();
+  return true;
+}
+
+async function commitPendingPollChanges() {
+  if (!currentPoll || !pollPendingChanges.size) return;
   const memberId = getPollActingMemberId();
   if (!memberId) {
     alert(isAdmin() ? '代理入力するメンバーを選択してください。' : 'メンバーに紐付いたアカウントでログインしてください。');
-    renderPollView();
     return;
   }
 
   const toAdd = [];
   const toRemove = [];
-  drag.keys.forEach(key => {
+  pollPendingChanges.forEach((change, key) => {
     const separatorIndex = key.lastIndexOf('_');
     const date = key.slice(0, separatorIndex);
     const start = Number(key.slice(separatorIndex + 1));
-    if (drag.add) toAdd.push({ poll_id: currentPoll.pollId, member_id: memberId, slot_date: date, slot_start_minutes: start });
+    if (change.add) toAdd.push({ poll_id: currentPoll.pollId, member_id: memberId, slot_date: date, slot_start_minutes: start });
     else toRemove.push({ date, start });
   });
+
+  const button = document.getElementById('pollCommitButton');
+  const restore = setButtonBusy(button, '保存中...');
 
   if (toAdd.length) {
     const { error } = await supabaseClient.from('availability_slots')
@@ -2576,8 +2616,11 @@ async function commitPollDrag(drag) {
       .eq('slot_start_minutes', start);
   }
 
+  restore();
+  pollPendingChanges.clear();
   await loadPollSlots(currentPoll.pollId);
   renderPollView();
+  updatePollPendingIndicator();
 }
 
 async function savePollForm() {

@@ -250,7 +250,11 @@
             </div>
           </div>
           <div id="pollInputControls">
-            <p id="pollInputHint" class="muted">マス目をドラッグすると、その時間帯に空いている/空いていないを切り替えられます（スマホは指でなぞってください）。<button type="button" class="link-button" onclick="resetPollSelection()">入力をリセット</button></p>
+            <p id="pollInputHint" class="muted">マス目をドラッグすると、その時間帯に空いている/空いていないを切り替えられます（スマホは指でなぞってください）。選び終わったら「完了」を押すと反映されます。<button type="button" class="link-button" onclick="resetPollSelection()">入力をリセット</button></p>
+            <div class="poll-commit-row">
+              <span id="pollPendingIndicator" class="muted"></span>
+              <button id="pollCommitButton" type="button" class="primary" onclick="commitPendingPollChanges()" disabled>完了</button>
+            </div>
           </div>
           <div id="pollGridWrap" class="poll-grid-wrap"></div>
           <div id="pollNoteInputWrap">

@@ -1367,6 +1367,13 @@ body.top-active .tab.active {
   font-size: 0.9em;
 }
 
+.poll-commit-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 10px;
+}
+
 .poll-grid-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
