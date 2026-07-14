@@ -898,12 +898,12 @@ function renderAnswerPage() {
   document.getElementById('answerEventBox').innerHTML = `
     <h3>${escapeHtml(event.eventName)}</h3>
     <div class="meta">
-      <div class="meta-label">分類</div><div>${escapeHtml(event.category)}</div>
-      <div class="meta-label">日付</div><div>${escapeHtml(formatDate(event.date))}</div>
-      <div class="meta-label">時間</div><div>${escapeHtml(timeText)}</div>
-      <div class="meta-label">場所</div><div>${event.placeUrl ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所')}</a>` : escapeHtml(event.place || '-')}</div>
-      <div class="meta-label">期限</div><div>${escapeHtml(formatDate(event.answerDeadline) || '-')}</div>
-      <div class="meta-label">備考</div><div>${escapeHtml(event.note || '-')}</div>
+      <div class="meta-item"><span class="meta-label">分類</span><span>${escapeHtml(event.category)}</span></div>
+      <div class="meta-item"><span class="meta-label">日付</span><span>${escapeHtml(formatDate(event.date))}</span></div>
+      <div class="meta-item"><span class="meta-label">時間</span><span>${escapeHtml(timeText)}</span></div>
+      <div class="meta-item"><span class="meta-label">場所</span><span>${event.placeUrl ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所')}</a>` : escapeHtml(event.place || '-')}</span></div>
+      <div class="meta-item"><span class="meta-label">期限</span><span>${escapeHtml(formatDate(event.answerDeadline) || '-')}</span></div>
+      <div class="meta-item meta-item-wide"><span class="meta-label">備考</span><span>${escapeHtml(event.note || '-')}</span></div>
     </div>
   `;
 
