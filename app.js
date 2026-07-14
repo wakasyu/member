@@ -3,7 +3,7 @@ const STATUS_LIST = ['参加', '不参加', '未定', '未回答'];
 let supabaseClient = null;
 let sessionUser = null;
 let currentProfile = null;
-let publicData = { events: [], members: [] };
+let publicData = { events: [], members: [], eventTargetOverrides: [] };
 let answerData = null;
 let currentAnswerToken = '';
 let categoryOptions = [];
@@ -12,6 +12,9 @@ let realtimeChannel = null;
 let refreshTimer = null;
 let adminTablesBound = false;
 const messageTimers = new Map();
+
+let eventFormTargetMemberIds = null;
+let eventFormPreAnswers = {};
 
 let availabilityPolls = [];
 let currentPoll = null;
@@ -412,19 +415,21 @@ function renderOptionGroup(containerId, options, type) {
 async function loadPublicData() {
   document.getElementById('publicStatus').textContent = '読み込み中...';
 
-  const [{ data: events, error: eventError }, { data: members, error: memberError }, { data: answers, error: answerError }] = await Promise.all([
+  const [{ data: events, error: eventError }, { data: members, error: memberError }, { data: answers, error: answerError }, { data: targets, error: targetError }] = await Promise.all([
     supabaseClient.from('events').select('*').order('date', { ascending: true }),
     supabaseClient.from('members').select('*').order('sort_order', { ascending: true }).order('name', { ascending: true }),
-    supabaseClient.from('answers').select('*')
+    supabaseClient.from('answers').select('*'),
+    supabaseClient.from('event_target_members').select('*')
   ]);
 
-  if (eventError || memberError || answerError) {
-    document.getElementById('publicStatus').textContent = `読み込みに失敗しました：${(eventError || memberError || answerError).message}`;
+  if (eventError || memberError || answerError || targetError) {
+    document.getElementById('publicStatus').textContent = `読み込みに失敗しました：${(eventError || memberError || answerError || targetError).message}`;
     return;
   }
 
   publicData.members = (members || []).map(normalizeMember);
-  publicData.events = (events || []).map(event => buildPublicEvent(normalizeEvent(event), publicData.members, answers || []));
+  publicData.eventTargetOverrides = targets || [];
+  publicData.events = (events || []).map(event => buildPublicEvent(normalizeEvent(event), publicData.members, answers || [], publicData.eventTargetOverrides));
   setupPublicFilters();
   renderPublic();
   populateAnswerEventSelect();
@@ -459,8 +464,8 @@ function flashCompletionOverlay(text) {
   }, 1400);
 }
 
-function buildPublicEvent(event, members, answers) {
-  const targetMembers = getEligibleMembers(event, members);
+function buildPublicEvent(event, members, answers, targetOverrides) {
+  const targetMembers = getEligibleMembers(event, members, targetOverrides);
   const eventAnswers = targetMembers.map(member => {
     const answer = answers.find(item => item.event_id === event.eventId && item.member_id === member.memberId);
     return {
@@ -803,7 +808,7 @@ async function loadAnswerData(token) {
     document.getElementById('answerStatus').textContent = '回答対象の予定が見つかりません。';
     return;
   }
-  answerData = { event, members: getEligibleMembers(event, publicData.members), answers: event.answers };
+  answerData = { event, members: getEligibleMembers(event, publicData.members, publicData.eventTargetOverrides), answers: event.answers };
   renderAnswerPage();
 }
 
@@ -1043,6 +1048,8 @@ function setupAdminTables() {
   document.getElementById('reasonCategoryOptions').addEventListener('click', handleOptionRemoveClick);
   document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
   document.getElementById('adminPolls').addEventListener('click', handleAdminPollsClick);
+  ['startTimeHour', 'startTimeMinute', 'endTimeHour', 'endTimeMinute'].forEach(id => populateTimeSelect(document.getElementById(id)));
+  renderEventTargetMemberList();
 }
 
 function handleAdminEventsClick(domEvent) {
@@ -1089,6 +1096,7 @@ function renderAdmin() {
   renderOptionManager();
   renderTopPhotoManager();
   renderAdminPolls();
+  renderEventTargetMemberList();
 }
 
 function renderAdminEvents() {
@@ -1129,7 +1137,7 @@ function renderAdminMembers() {
       <td data-label="生年月日">${birthDateHtml}</td>
       <td data-label="入会日">${escapeHtml(member.joinDate ? formatDate(member.joinDate) : '')}</td>
       <td data-label="退会日">${escapeHtml(member.leaveDate ? formatDate(member.leaveDate) : '')}</td>
-      <td data-label="衣装">${escapeHtml(member.costumeSize || '')}</td>
+      <td data-label="袴">${escapeHtml(member.costumeSize || '')}</td>
       <td data-label="Tシャツ">${escapeHtml(member.tshirtSize || '')}</td>
       <td class="wrap" data-label="備考">${escapeHtml(member.note || '')}</td>
     ` : '';
@@ -1150,7 +1158,7 @@ function renderAdminMembers() {
     </tr>
   `;
   }).join('');
-  const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>衣装</th><th>Tシャツ</th><th>備考</th>' : '';
+  const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>袴</th><th>Tシャツ</th><th>備考</th>' : '';
   const colCount = showAll ? 15 : 8;
   document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
 }
@@ -1272,12 +1280,36 @@ async function saveEventForm() {
   const button = document.getElementById('saveEventButton');
   const restore = setButtonBusy(button, '保存中...');
   const { error } = await supabaseClient.from('events').upsert(payload);
-  restore();
   if (error) {
+    restore();
     showMessage('eventMessage', error.message, false);
     return;
   }
 
+  const limitTargets = document.getElementById('eventLimitTargets').checked;
+  await supabaseClient.from('event_target_members').delete().eq('event_id', eventId);
+  let targetMemberIds = publicData.members.map(member => member.memberId);
+  if (limitTargets) {
+    const checked = Array.from(document.querySelectorAll('#eventTargetMemberList [data-target-member]:checked')).map(el => el.dataset.targetMember);
+    targetMemberIds = checked;
+    if (checked.length) {
+      await supabaseClient.from('event_target_members').insert(checked.map(memberId => ({ event_id: eventId, member_id: memberId })));
+    }
+  }
+
+  const preAnswerEntries = Array.from(document.querySelectorAll('#eventTargetMemberList [data-preanswer-member]'))
+    .map(select => ({ memberId: select.dataset.preanswerMember, status: select.value }))
+    .filter(entry => entry.status && targetMemberIds.includes(entry.memberId));
+  for (const entry of preAnswerEntries) {
+    await supabaseClient.from('answers').upsert({
+      event_id: eventId,
+      member_id: entry.memberId,
+      status: entry.status,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'event_id,member_id' });
+  }
+
+  restore();
   await appendLog(isEdit ? '予定編集' : '予定追加', eventId, eventName, '', '', '', '', '');
   showMessage('eventMessage', `予定を保存しました。日程調整リンク：${createScheduleUrl(token)}`, true);
   clearEventForm();
@@ -1293,13 +1325,21 @@ function editEvent(eventId) {
   document.getElementById('eventName').value = event.eventName || '';
   document.getElementById('eventCategory').value = event.category || '';
   document.getElementById('eventDate').value = event.date || '';
-  document.getElementById('startTime').value = event.startTime || '';
-  document.getElementById('endTime').value = event.endTime || '';
+  setTimeSelectValue('startTime', event.startTime || '');
+  setTimeSelectValue('endTime', event.endTime || '');
   document.getElementById('place').value = event.place || '';
+  const overrides = publicData.eventTargetOverrides.filter(row => row.event_id === event.eventId);
+  document.getElementById('eventLimitTargets').checked = overrides.length > 0;
+  eventFormTargetMemberIds = overrides.length ? new Set(overrides.map(row => row.member_id)) : null;
+  eventFormPreAnswers = {};
+  (event.answers || []).forEach(answer => {
+    if (answer.status && answer.status !== '未回答') eventFormPreAnswers[answer.memberId] = answer.status;
+  });
   document.getElementById('placeUrl').value = event.placeUrl || '';
   document.getElementById('creator').value = event.creator || '';
   document.getElementById('answerDeadline').value = event.answerDeadline || '';
   document.getElementById('eventNote').value = event.note || '';
+  renderEventTargetMemberList();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1330,11 +1370,90 @@ async function restoreEvent(eventId) {
 }
 
 function clearEventForm() {
-  ['eventId', 'eventToken', 'eventName', 'eventDate', 'startTime', 'endTime', 'place', 'placeUrl', 'creator', 'answerDeadline', 'eventNote'].forEach(id => {
+  ['eventId', 'eventToken', 'eventName', 'eventDate', 'place', 'placeUrl', 'creator', 'answerDeadline', 'eventNote'].forEach(id => {
     document.getElementById(id).value = '';
   });
+  setTimeSelectValue('startTime', '');
+  setTimeSelectValue('endTime', '');
   document.getElementById('eventCategory').value = '';
   document.getElementById('creator').value = currentProfile ? (currentProfile.display_name || '') : '';
+  document.getElementById('eventLimitTargets').checked = false;
+  eventFormTargetMemberIds = null;
+  eventFormPreAnswers = {};
+  renderEventTargetMemberList();
+}
+
+function renderEventTargetMemberList() {
+  const container = document.getElementById('eventTargetMemberList');
+  if (!container) return;
+  const limit = document.getElementById('eventLimitTargets').checked;
+  const date = document.getElementById('eventDate').value;
+  const autoEligible = date ? getEligibleMembers({ eventId: '__preview__', date }, publicData.members, []) : publicData.members.filter(isActiveRoster);
+  const autoIds = new Set(autoEligible.map(member => member.memberId));
+  const checkedIds = limit && eventFormTargetMemberIds ? eventFormTargetMemberIds : autoIds;
+
+  const rows = publicData.members.filter(isActiveRoster).map(member => {
+    const checked = checkedIds.has(member.memberId);
+    const status = eventFormPreAnswers[member.memberId] || '';
+    const included = limit ? checked : true;
+    const checkboxHtml = limit
+      ? `<label class="inline-check"><input type="checkbox" data-target-member="${escapeAttr(member.memberId)}" ${checked ? 'checked' : ''} onchange="toggleEventTargetMember('${escapeAttr(member.memberId)}', this.checked)"> ${escapeHtml(displayName(member))}</label>`
+      : `<span>${escapeHtml(displayName(member))}</span>`;
+    return `
+      <div class="event-target-row ${included ? '' : 'is-muted'}">
+        ${checkboxHtml}
+        <select data-preanswer-member="${escapeAttr(member.memberId)}" ${included ? '' : 'disabled'} onchange="eventFormPreAnswers[this.dataset.preanswerMember] = this.value">
+          <option value="">未回答</option>
+          <option value="参加" ${status === '参加' ? 'selected' : ''}>参加</option>
+          <option value="不参加" ${status === '不参加' ? 'selected' : ''}>不参加</option>
+          <option value="未定" ${status === '未定' ? 'selected' : ''}>未定</option>
+        </select>
+      </div>`;
+  }).join('');
+  container.innerHTML = rows || '<p class="muted">メンバーがいません。</p>';
+
+  if (limit && !eventFormTargetMemberIds) {
+    eventFormTargetMemberIds = new Set(autoIds);
+  }
+}
+
+function toggleEventTargetMember(memberId, checked) {
+  if (!eventFormTargetMemberIds) eventFormTargetMemberIds = new Set();
+  if (checked) eventFormTargetMemberIds.add(memberId);
+  else eventFormTargetMemberIds.delete(memberId);
+  renderEventTargetMemberList();
+}
+
+function populateTimeSelect(select) {
+  if (!select || select.dataset.populated) return;
+  select.dataset.populated = 'true';
+  const isHour = select.id.endsWith('Hour');
+  const max = isHour ? 24 : 60;
+  let html = '<option value="">--</option>';
+  for (let i = 0; i < max; i++) {
+    const value = String(i).padStart(2, '0');
+    html += `<option value="${value}">${value}</option>`;
+  }
+  select.innerHTML = html;
+}
+
+function setTimeSelectValue(hiddenId, value) {
+  const [h, m] = String(value || '').split(':');
+  const hourSelect = document.getElementById(`${hiddenId}Hour`);
+  const minuteSelect = document.getElementById(`${hiddenId}Minute`);
+  populateTimeSelect(hourSelect);
+  populateTimeSelect(minuteSelect);
+  if (hourSelect) hourSelect.value = h || '';
+  if (minuteSelect) minuteSelect.value = m || '';
+  document.getElementById(hiddenId).value = value ? `${h}:${m}` : '';
+}
+
+function syncTimeSelectField(hiddenId) {
+  const hourSelect = document.getElementById(`${hiddenId}Hour`);
+  const minuteSelect = document.getElementById(`${hiddenId}Minute`);
+  const hour = hourSelect ? hourSelect.value : '';
+  const minute = minuteSelect ? minuteSelect.value : '';
+  document.getElementById(hiddenId).value = (hour && minute) ? `${hour}:${minute}` : '';
 }
 
 async function saveMemberForm() {
@@ -1655,7 +1774,15 @@ function groupByMonth(events) {
 }
 
 function compareEvents(a, b) {
-  return getTimeValue(a.date) - getTimeValue(b.date) || String(a.eventName || '').localeCompare(String(b.eventName || ''), 'ja');
+  return getTimeValue(a.date) - getTimeValue(b.date)
+    || getEventStartMinutes(a) - getEventStartMinutes(b)
+    || String(a.eventName || '').localeCompare(String(b.eventName || ''), 'ja');
+}
+
+function getEventStartMinutes(event) {
+  if (!event.startTime) return Number.MAX_SAFE_INTEGER;
+  const [h, m] = String(event.startTime).split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
 }
 
 function isPastEvent(event) {
@@ -1742,7 +1869,12 @@ function showSharePrompt(text) {
   window.prompt('共有文をコピーしてください。', text);
 }
 
-function getEligibleMembers(event, members) {
+function getEligibleMembers(event, members, targetOverrides) {
+  const overrides = (targetOverrides || []).filter(row => row.event_id === event.eventId);
+  if (overrides.length) {
+    const targetIds = new Set(overrides.map(row => row.member_id));
+    return members.filter(member => targetIds.has(member.memberId));
+  }
   const eventDate = parseDate(event.date);
   const today = new Date();
   today.setHours(0, 0, 0, 0);

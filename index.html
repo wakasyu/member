@@ -83,7 +83,7 @@
           <input id="registerBirthDate" type="date">
         </label>
         <label>
-          衣装サイズ
+          袴サイズ
           <input id="registerCostumeSize" type="text">
         </label>
         <label>
@@ -130,9 +130,6 @@
 
     <section id="topView" class="view active">
       <div class="top-hero-panel">
-        <div class="top-hero-mark"><img src="./logo.jpg" alt="" onerror="this.remove()"><span>若衆</span></div>
-        <h1>若衆メンバー専用サイト</h1>
-        <p>練習・演奏の記録とともに</p>
         <div class="top-hero-highlights">
           <div id="topNextEvent" class="top-hero-stat"></div>
           <div id="topPendingAnswers" class="top-hero-stat"></div>
@@ -288,15 +285,25 @@
         <div class="grid3">
           <label>予定名<input id="eventName" type="text"></label>
           <label>分類<select id="eventCategory"></select></label>
-          <label>日付<input id="eventDate" type="date"></label>
-          <label>開始時間<input id="startTime" type="time"></label>
-          <label>終了時間<input id="endTime" type="time"></label>
+          <label>日付<input id="eventDate" type="date" onchange="renderEventTargetMemberList()"></label>
+          <label>開始時間<span class="time-select-pair">
+            <select id="startTimeHour" onchange="syncTimeSelectField('startTime')"></select>：<select id="startTimeMinute" onchange="syncTimeSelectField('startTime')"></select>
+          </span><input id="startTime" type="hidden"></label>
+          <label>終了時間<span class="time-select-pair">
+            <select id="endTimeHour" onchange="syncTimeSelectField('endTime')"></select>：<select id="endTimeMinute" onchange="syncTimeSelectField('endTime')"></select>
+          </span><input id="endTime" type="hidden"></label>
           <label>場所<input id="place" type="text"></label>
           <label>場所URL<input id="placeUrl" type="url" placeholder="https://..."></label>
           <label>作成者<input id="creator" type="text"></label>
           <label>回答期限<input id="answerDeadline" type="date"></label>
         </div>
         <label class="wide-field">備考<textarea id="eventNote"></textarea></label>
+
+        <div class="panel-head"><h3>対象メンバー・出欠の事前入力</h3></div>
+        <label class="inline-check"><input id="eventLimitTargets" type="checkbox" onchange="renderEventTargetMemberList()"> 対象メンバーを絞る（未チェックなら在籍期間から自動判定）</label>
+        <p class="muted">対象メンバーごとに、その場で出欠を入力しておくこともできます（あとから通常の回答でも変更できます）。</p>
+        <div id="eventTargetMemberList" class="event-target-list"></div>
+
         <div class="button-row">
           <button id="saveEventButton" class="primary" type="button" onclick="saveEventForm()">予定を保存</button>
           <button type="button" onclick="clearEventForm()">入力をクリア</button>
@@ -335,7 +342,7 @@
 
         <div class="panel-head"><h3>装備・担当</h3></div>
         <div class="grid3">
-          <label>衣装サイズ<input id="costumeSize" type="text"></label>
+          <label>袴サイズ<input id="costumeSize" type="text"></label>
           <label>Tシャツサイズ<input id="tshirtSize" type="text"></label>
           <label>担当<input id="duty" type="text"></label>
         </div>

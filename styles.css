@@ -211,6 +211,44 @@ textarea {
   font-weight: 800;
 }
 
+.event-target-list {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+
+.event-target-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.event-target-row.is-muted {
+  opacity: .45;
+}
+
+.event-target-row select {
+  max-width: 110px;
+}
+
+.time-select-pair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.time-select-pair select {
+  flex: 1;
+  min-width: 0;
+}
+
 .form-footer-links {
   display: flex;
   justify-content: center;
@@ -1075,49 +1113,10 @@ body.top-active .tab.active {
   text-align: center;
 }
 
-.top-hero-mark {
-  position: relative;
-  overflow: hidden;
-  width: 56px;
-  height: 56px;
-  margin: 0 auto;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: rgba(255, 255, 255, .18);
-  color: #fff;
-  font-weight: 900;
-}
-
-.top-hero-mark img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.top-hero-mark:has(img) span {
-  display: none;
-}
-
-.top-hero-panel h1 {
-  color: #fff;
-  font-size: 24px;
-  margin: 12px 0 0;
-}
-
-.top-hero-panel p {
-  color: rgba(255, 255, 255, .85);
-  margin: 4px 0 0;
-  font-size: 14px;
-}
-
 .top-hero-highlights {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 20px;
   text-align: left;
 }
 

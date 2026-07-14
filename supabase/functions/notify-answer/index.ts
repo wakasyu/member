@@ -61,19 +61,29 @@ async function maybeNotifyCompletion(event: Record<string, any>) {
 
   const { data: members } = await supabase.from("members").select("*");
   const { data: answers } = await supabase.from("answers").select("*").eq("event_id", event.id);
+  const { data: targetOverrides } = await supabase
+    .from("event_target_members")
+    .select("member_id")
+    .eq("event_id", event.id);
 
   const eventDate = event.date ? new Date(event.date) : null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const eligible = (members ?? []).filter((m: Record<string, any>) => {
-    let leaveDate = m.leave_date ? new Date(m.leave_date) : null;
-    if (!leaveDate && m.member_state === "退会") leaveDate = today;
-    const joinDate = m.join_date ? new Date(m.join_date) : null;
-    if (eventDate && joinDate && eventDate < joinDate) return false;
-    if (eventDate && leaveDate && eventDate >= leaveDate) return false;
-    return true;
-  });
+  let eligible: Record<string, any>[];
+  if (targetOverrides && targetOverrides.length) {
+    const targetIds = new Set(targetOverrides.map((row: Record<string, any>) => row.member_id));
+    eligible = (members ?? []).filter((m: Record<string, any>) => targetIds.has(m.id));
+  } else {
+    eligible = (members ?? []).filter((m: Record<string, any>) => {
+      let leaveDate = m.leave_date ? new Date(m.leave_date) : null;
+      if (!leaveDate && m.member_state === "退会") leaveDate = today;
+      const joinDate = m.join_date ? new Date(m.join_date) : null;
+      if (eventDate && joinDate && eventDate < joinDate) return false;
+      if (eventDate && leaveDate && eventDate >= leaveDate) return false;
+      return true;
+    });
+  }
 
   if (!eligible.length) return;
 

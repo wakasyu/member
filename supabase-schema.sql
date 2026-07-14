@@ -169,6 +169,15 @@ create table if not exists public.events (
 -- 対象メンバー全員が回答し終わった時の「完了メール」を二重送信しないための記録用
 alter table public.events add column if not exists completion_notified_at timestamptz null;
 
+-- 対象メンバーを在籍期間による自動判定ではなく、その予定だけ手動で絞り込みたい場合に使う
+-- （例：入会者面談は特定の数人だけが対象）。この予定にレコードが1件でもあれば、
+-- 自動判定の代わりにここに登録されたメンバーだけを対象として扱う。
+create table if not exists public.event_target_members (
+  event_id uuid not null references public.events(id) on delete cascade,
+  member_id uuid not null references public.members(id) on delete cascade,
+  primary key (event_id, member_id)
+);
+
 create table if not exists public.answers (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
@@ -401,6 +410,21 @@ using (true);
 drop policy if exists "events write admin" on public.events;
 create policy "events write admin"
 on public.events for all
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
+
+alter table public.event_target_members enable row level security;
+
+drop policy if exists "event_target_members read authenticated" on public.event_target_members;
+create policy "event_target_members read authenticated"
+on public.event_target_members for select
+to authenticated
+using (true);
+
+drop policy if exists "event_target_members write admin" on public.event_target_members;
+create policy "event_target_members write admin"
+on public.event_target_members for all
 to authenticated
 using (public.is_admin())
 with check (public.is_admin());
