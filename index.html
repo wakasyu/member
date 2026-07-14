@@ -139,14 +139,12 @@
       <button class="tab" type="button" data-tab="poll" onclick="switchView('poll')">候補日程調整</button>
       <button id="eventFormTabButton" class="tab hidden" type="button" data-tab="eventForm" onclick="switchView('eventForm')">予定追加</button>
       <button id="adminTabButton" class="tab hidden" type="button" data-tab="admin" onclick="switchView('admin')">管理</button>
+      <div id="topNextEvent" class="top-hero-stat"></div>
+      <div id="topPendingAnswers" class="top-hero-stat"></div>
     </nav>
 
     <section id="topView" class="view active">
       <div class="top-hero-panel">
-        <div class="top-hero-highlights">
-          <div id="topNextEvent" class="top-hero-stat"></div>
-          <div id="topPendingAnswers" class="top-hero-stat"></div>
-        </div>
         <div id="topHeroDots" class="top-hero-dots"></div>
       </div>
     </section>

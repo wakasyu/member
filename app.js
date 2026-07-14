@@ -1883,8 +1883,8 @@ function renderTopHighlights() {
   nextBox.classList.toggle('clickable', Boolean(next));
   nextBox.onclick = next ? () => switchView('public') : null;
   nextBox.innerHTML = next
-    ? `<p class="muted" style="margin:0 0 4px;font-size:12px;">次の予定</p><p style="margin:0 0 4px;font-size:15px;font-weight:900;">${escapeHtml(next.eventName)}</p><p class="muted" style="margin:0;font-size:13px;">${escapeHtml(formatDate(next.date))}${next.startTime ? escapeHtml(' ' + next.startTime + '〜') : ''}</p>`
-    : `<p class="muted" style="margin:0 0 4px;font-size:12px;">次の予定</p><p style="margin:0;font-size:14px;">予定はまだありません</p>`;
+    ? `<span class="muted">次の予定：</span>${escapeHtml(next.eventName)}　${escapeHtml(formatDate(next.date))}${next.startTime ? escapeHtml(' ' + next.startTime + '〜') : ''}`
+    : `<span class="muted">次の予定：</span>まだありません`;
 
   const memberId = currentProfile ? currentProfile.member_id : null;
   if (memberId) {
@@ -1894,14 +1894,14 @@ function renderTopHighlights() {
     });
     const pendingCount = pendingEvents.length;
     pendingBox.classList.toggle('clickable', pendingCount > 0);
-    pendingBox.onclick = pendingCount ? () => openAnswerInApp(pendingEvents[0].answerToken) : null;
+    pendingBox.onclick = pendingCount ? () => switchView('public') : null;
     pendingBox.innerHTML = pendingCount
-      ? `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0 0 4px;font-size:15px;font-weight:900;">未回答が${pendingCount}件あります</p><span class="badge pending">要回答</span>`
-      : `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0;font-size:14px;">未回答はありません</p>`;
+      ? `<span class="muted">あなたの回答：</span>未回答${pendingCount}件<span class="badge pending">要回答</span>`
+      : `<span class="muted">あなたの回答：</span>未回答はありません`;
   } else {
     pendingBox.classList.remove('clickable');
     pendingBox.onclick = null;
-    pendingBox.innerHTML = `<p class="muted" style="margin:0 0 4px;font-size:12px;">あなたの回答</p><p style="margin:0;font-size:13px;">アカウントがメンバーに紐付けられていません</p>`;
+    pendingBox.innerHTML = `<span class="muted">あなたの回答：</span>アカウント未紐付け`;
   }
 }
 
