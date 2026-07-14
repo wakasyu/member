@@ -754,6 +754,68 @@ textarea {
   color: var(--pen);
 }
 
+.inline-status-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.status-btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.status-btn.join.active {
+  background: var(--join-bg);
+  border-color: var(--join);
+  color: var(--join);
+}
+
+.status-btn.absent.active {
+  background: var(--abs-bg);
+  border-color: var(--abs);
+  color: var(--abs);
+}
+
+.status-btn.pending.active {
+  background: var(--pen-bg);
+  border-color: var(--pen);
+  color: var(--pen);
+}
+
+.inline-extra-fields {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+
+.inline-extra-fields label {
+  display: grid;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.inline-extra-fields button.small {
+  justify-self: start;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.event-row.needs-answer {
+  border-left: 3px solid var(--pen);
+}
+
 .badge.none {
   background: var(--none-bg);
   color: var(--none);

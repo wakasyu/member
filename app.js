@@ -616,7 +616,44 @@ function createEventRowHtml(event) {
   if (deadlineText) metaParts.push(`<span>期限 ${escapeHtml(deadlineText)}</span>`);
   if (event.creator) metaParts.push(`<span>作成 ${escapeHtml(event.creator)}</span>`);
 
-  const answerHtml = (event.answers || []).map(answer => `
+  const myMemberId = currentProfile ? currentProfile.member_id : null;
+  const locked = isAnswerLocked(event);
+
+  const answerHtml = (event.answers || []).map(answer => {
+    const canEdit = !locked && (isAdmin() || answer.memberId === myMemberId);
+    return canEdit ? createInlineAnswerChipHtml(event, answer) : createStaticAnswerChipHtml(answer);
+  }).join('');
+
+  const countsHtml = STATUS_LIST.map(status => `<span class="badge ${statusClass(status)}">${escapeHtml(status)} ${Number(event.counts && event.counts[status] || 0)}</span>`).join('');
+
+  const needsMyAnswer = myMemberId && !isAdmin() && findAnswerForMember(event, myMemberId) && findAnswerForMember(event, myMemberId).status === '未回答';
+
+  return `
+    <article class="event-row ${needsMyAnswer ? 'needs-answer' : ''}">
+      <div class="event-row-top">
+        <div class="event-row-summary">
+          <div class="event-row-head">
+            <span class="cat">${escapeHtml(event.category || 'その他')}</span>
+            <span class="event-title">${escapeHtml(event.eventName)}</span>
+            ${needsMyAnswer ? '<span class="badge pending">要回答</span>' : ''}
+          </div>
+          <div class="event-meta-line">${metaParts.join('')}</div>
+          ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
+        </div>
+        <div class="share-actions">
+          <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
+        </div>
+      </div>
+      <div class="event-row-body">
+        <div class="members">${answerHtml || '<div class="muted">回答対象メンバーがいません。</div>'}</div>
+        <div class="counts-inline">${countsHtml}</div>
+      </div>
+    </article>
+  `;
+}
+
+function createStaticAnswerChipHtml(answer) {
+  return `
     <div class="member-chip">
       <div class="member-head">
         <span class="member-name">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>
@@ -626,35 +663,35 @@ function createEventRowHtml(event) {
       ${answer.comment ? `<div class="comment">コメント：${escapeHtml(answer.comment)}</div>` : ''}
       ${formatReasonText(answer) ? `<div class="comment">理由：${escapeHtml(formatReasonText(answer))}</div>` : ''}
     </div>
-  `).join('');
+  `;
+}
 
-  const countsHtml = STATUS_LIST.map(status => `<span class="badge ${statusClass(status)}">${escapeHtml(status)} ${Number(event.counts && event.counts[status] || 0)}</span>`).join('');
-
-  const myMemberId = currentProfile ? currentProfile.member_id : null;
-  const myAnswer = myMemberId ? findAnswerForMember(event, myMemberId) : null;
-  const answerLabel = myAnswer && myAnswer.status !== '未回答' ? '予定を変更する' : '回答する';
+function createInlineAnswerChipHtml(event, answer) {
+  const status = answer.status;
+  const showExtra = status === '未定';
+  const reasonOptions = reasonCategoryOptions.map(option =>
+    `<option value="${escapeAttr(option.label)}" ${answer.reasonCategory === option.label ? 'selected' : ''}>${escapeHtml(option.label)}</option>`
+  ).join('');
 
   return `
-    <article class="event-row">
-      <div class="event-row-top">
-        <div class="event-row-summary">
-          <div class="event-row-head">
-            <span class="cat">${escapeHtml(event.category || 'その他')}</span>
-            <span class="event-title">${escapeHtml(event.eventName)}</span>
-          </div>
-          <div class="event-meta-line">${metaParts.join('')}</div>
-          ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
-        </div>
-        <div class="share-actions">
-          <button type="button" data-open-answer="${escapeAttr(event.answerToken)}">${escapeHtml(answerLabel)}</button>
-          <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
+    <div class="member-chip inline-answer" data-event-token="${escapeAttr(event.answerToken)}" data-member-id="${escapeAttr(answer.memberId)}">
+      <div class="member-head">
+        <span class="member-name">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>
+        <div class="inline-status-buttons">
+          <button type="button" class="status-btn join ${status === '参加' ? 'active' : ''}" data-set-status="参加">参加</button>
+          <button type="button" class="status-btn absent ${status === '不参加' ? 'active' : ''}" data-set-status="不参加">不参加</button>
+          <button type="button" class="status-btn pending ${status === '未定' ? 'active' : ''}" data-set-status="未定">未定</button>
+          ${status !== '未回答' ? '<button type="button" class="link-button small" data-clear-status>取消</button>' : ''}
         </div>
       </div>
-      <div class="event-row-body">
-        <div class="members">${answerHtml || '<div class="muted">回答対象メンバーがいません。</div>'}</div>
-        <div class="counts-inline">${countsHtml}</div>
+      <div class="inline-extra-fields ${showExtra ? '' : 'hidden'}">
+        <label>いつまでに分かるか<input type="date" data-pending-until value="${escapeAttr(answer.pendingUntil || '')}"></label>
+        <label>理由カテゴリ<select data-reason-category><option value="">選択なし</option>${reasonOptions}</select></label>
+        <label>理由詳細<input type="text" data-reason-detail value="${escapeAttr(answer.reasonDetail || '')}"></label>
+        <label>コメント<textarea data-comment>${escapeHtml(answer.comment || '')}</textarea></label>
+        <button type="button" class="small" data-save-extra>保存</button>
       </div>
-    </article>
+    </div>
   `;
 }
 
@@ -1075,10 +1112,84 @@ function handleAdminMembersClick(domEvent) {
 }
 
 function handlePublicListClick(domEvent) {
-  const answerButton = domEvent.target.closest('[data-open-answer]');
   const copyButton = domEvent.target.closest('[data-copy-share]');
-  if (answerButton) openAnswerInApp(answerButton.dataset.openAnswer);
-  else if (copyButton) copyShareText(copyButton.dataset.copyShare, copyButton);
+  const statusButton = domEvent.target.closest('[data-set-status]');
+  const clearButton = domEvent.target.closest('[data-clear-status]');
+  const saveExtraButton = domEvent.target.closest('[data-save-extra]');
+  if (copyButton) {
+    copyShareText(copyButton.dataset.copyShare, copyButton);
+    return;
+  }
+  const chip = domEvent.target.closest('.inline-answer');
+  if (!chip) return;
+  const eventToken = chip.dataset.eventToken;
+  const memberId = chip.dataset.memberId;
+  if (statusButton) {
+    submitInlineAnswer(eventToken, memberId, statusButton.dataset.setStatus);
+  } else if (clearButton) {
+    clearInlineAnswer(eventToken, memberId);
+  } else if (saveExtraButton) {
+    const status = chip.querySelector('.status-btn.active')?.dataset.setStatus || '未定';
+    submitInlineAnswer(eventToken, memberId, status, {
+      pendingUntil: chip.querySelector('[data-pending-until]').value,
+      reasonCategory: chip.querySelector('[data-reason-category]').value,
+      reasonDetail: chip.querySelector('[data-reason-detail]').value,
+      comment: chip.querySelector('[data-comment]').value
+    });
+  }
+}
+
+async function submitInlineAnswer(eventToken, memberId, status, extra) {
+  const event = publicData.events.find(item => item.answerToken === eventToken);
+  if (!event) return;
+  if (isAnswerLocked(event)) {
+    alert('回答期限を過ぎているため送信できません。');
+    return;
+  }
+  const previous = findAnswerForMember(event, memberId);
+  const payload = {
+    event_id: event.eventId,
+    member_id: memberId,
+    status,
+    pending_until: status === '未定' ? nullIfEmpty(extra && extra.pendingUntil) : null,
+    comment: (extra && extra.comment) ? extra.comment.trim() : '',
+    reason_category: (extra && extra.reasonCategory) || '',
+    reason_detail: (extra && extra.reasonDetail) ? extra.reasonDetail.trim() : '',
+    updated_at: new Date().toISOString()
+  };
+
+  const { error } = await supabaseClient.from('answers').upsert(payload, { onConflict: 'event_id,member_id' });
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  const member = publicData.members.find(item => item.memberId === memberId);
+  const detail = [payload.comment || payload.reason_detail, proxyLogSuffix(memberId)].filter(Boolean).join(' ');
+  await appendLog('日程調整回答', event.eventId, event.eventName, memberId, member ? member.name : '', previous ? previous.status : '未回答', status, detail);
+  flashCompletionOverlay('回答を反映しました');
+  await refreshAll();
+}
+
+async function clearInlineAnswer(eventToken, memberId) {
+  const event = publicData.events.find(item => item.answerToken === eventToken);
+  if (!event) return;
+  if (isAnswerLocked(event)) {
+    alert('回答期限を過ぎているため取り消せません。');
+    return;
+  }
+  if (!confirm('この回答を取り消して未回答に戻しますか？')) return;
+
+  const previous = findAnswerForMember(event, memberId);
+  const { error } = await supabaseClient.from('answers').delete().eq('event_id', event.eventId).eq('member_id', memberId);
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  const member = publicData.members.find(item => item.memberId === memberId);
+  await appendLog('回答取消', event.eventId, event.eventName, memberId, member ? member.name : '', previous ? previous.status : '', '未回答', proxyLogSuffix(memberId));
+  await refreshAll();
 }
 
 function handleOptionRemoveClick(domEvent) {
