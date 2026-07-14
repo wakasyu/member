@@ -1382,6 +1382,8 @@ body.top-active .tab.active {
 .poll-row {
   display: grid;
   grid-template-columns: 56px repeat(var(--poll-cols), minmax(56px, 1fr));
+  align-items: start;
+  border-top: 2px solid var(--main-border);
 }
 
 .poll-row-head {
@@ -1389,6 +1391,7 @@ body.top-active .tab.active {
   top: 0;
   background: #fff;
   z-index: 1;
+  border-top: none;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1402,37 +1405,44 @@ body.top-active .tab.active {
 
 .poll-time-label {
   text-align: right;
-  padding: 0 8px 0 0;
-  font-size: 0.75em;
+  padding: 1px 8px 0 0;
+  font-size: 0.72em;
+  font-weight: 700;
   color: var(--main-2);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.poll-hour-block {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  margin-left: -1px;
 }
 
 .poll-cell {
-  height: 26px;
-  border: 1px solid var(--border);
-  margin: -1px 0 0 -1px;
+  flex: 0 0 13px;
+  height: 13px;
+  border-bottom: 1px solid var(--surface-2);
+  border-right: 1px solid var(--border);
   background: #fff;
   cursor: pointer;
   user-select: none;
   touch-action: none;
 }
 
+.poll-cell:last-child {
+  border-bottom: none;
+}
+
 .poll-cell.selected {
   background: var(--main);
-  border-color: var(--main-2);
 }
 
 .poll-cell.result {
   cursor: default;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.7em;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   background: rgba(29, 79, 143, var(--intensity, 0));
 }
 

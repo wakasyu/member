@@ -2262,6 +2262,15 @@ function getPollSlotStarts(poll) {
   return starts;
 }
 
+// グリッドの行は1時間単位。1時間未満の刻み（15分/30分）はその行の中で
+// 縦に並ぶ色分けブロックとして表現し、時刻ラベルは行の境界（1時間ごと）にだけ置く。
+function getPollHourStarts(poll) {
+  const starts = [];
+  const firstHour = Math.floor(poll.dayStartMinutes / 60) * 60;
+  for (let h = firstHour; h < poll.dayEndMinutes; h += 60) starts.push(h);
+  return starts;
+}
+
 function getPollWeekDates(poll, weekOffset) {
   const start = parseDate(poll.periodStart);
   const end = parseDate(poll.periodEnd);
@@ -2354,19 +2363,25 @@ function renderPollView() {
     return `<div class="poll-col-head">${escapeHtml(label)}</div>`;
   }).join('');
 
-  const rows = starts.map(start => {
-    const timeLabel = minutesToLabel(start);
+  const hourStarts = getPollHourStarts(currentPoll);
+  const rows = hourStarts.map(hourStart => {
+    const timeLabel = minutesToLabel(hourStart);
+    const subStarts = starts.filter(start => start >= hourStart && start < hourStart + 60);
     const cells = dates.map(d => {
       const iso = toIsoDate(d);
-      const key = `${iso}_${start}`;
-      if (pollMode === 'input') {
-        const selected = mySelectedKeys.has(key);
-        return `<div class="poll-cell ${selected ? 'selected' : ''}" data-date="${escapeAttr(iso)}" data-start="${start}"></div>`;
-      }
-      const count = countMap.get(key) || 0;
-      const intensity = count ? Math.min(1, 0.15 + 0.75 * (count / maxCount)) : 0;
-      const names = (namesMap.get(key) || []).join('、');
-      return `<div class="poll-cell result" style="--intensity:${intensity}" title="${escapeAttr(names)}">${count || ''}</div>`;
+      const subCells = subStarts.map(start => {
+        const key = `${iso}_${start}`;
+        if (pollMode === 'input') {
+          const selected = mySelectedKeys.has(key);
+          return `<div class="poll-cell ${selected ? 'selected' : ''}" data-date="${escapeAttr(iso)}" data-start="${start}" title="${escapeAttr(minutesToLabel(start))}"></div>`;
+        }
+        const count = countMap.get(key) || 0;
+        const intensity = count ? Math.min(1, 0.15 + 0.75 * (count / maxCount)) : 0;
+        const names = (namesMap.get(key) || []).join('、');
+        const tip = `${minutesToLabel(start)} ${count}人${names ? '：' + names : ''}`;
+        return `<div class="poll-cell result" style="--intensity:${intensity}" title="${escapeAttr(tip)}"></div>`;
+      }).join('');
+      return `<div class="poll-hour-block">${subCells}</div>`;
     }).join('');
     return `<div class="poll-row"><div class="poll-time-label">${timeLabel}</div>${cells}</div>`;
   }).join('');
