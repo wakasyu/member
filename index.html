@@ -317,9 +317,9 @@
         <label class="wide-field">備考<textarea id="eventNote"></textarea></label>
 
         <div id="eventTargetSection" class="hidden">
-          <div class="panel-head"><h3>対象メンバー・出欠の事前入力</h3></div>
+          <div class="panel-head"><h3>対象メンバー</h3></div>
           <label class="inline-check"><input id="eventLimitTargets" type="checkbox" onchange="renderEventTargetMemberList()"> 対象メンバーを絞る（未チェックなら在籍期間から自動判定）</label>
-          <p class="muted">対象メンバーごとに、その場で出欠を入力しておくこともできます（あとから通常の回答でも変更できます）。</p>
+          <p id="eventTargetHint" class="muted"></p>
           <div id="eventTargetMemberList" class="event-target-list"></div>
         </div>
 

@@ -1183,7 +1183,7 @@ function setupAdminTables() {
   document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
   document.getElementById('adminPolls').addEventListener('click', handleAdminPollsClick);
   ['startTimeHour', 'startTimeMinute', 'endTimeHour', 'endTimeMinute'].forEach(id => populateTimeSelect(document.getElementById(id)));
-  document.getElementById('eventTargetSection').classList.toggle('hidden', !isAdmin());
+  document.getElementById('eventTargetSection').classList.toggle('hidden', !(isAdmin() || isStaff()));
   renderEventTargetMemberList();
 }
 
@@ -1505,7 +1505,7 @@ async function saveEventForm() {
     return;
   }
 
-  if (isAdmin()) {
+  if (isAdmin() || isStaff()) {
     const limitTargets = document.getElementById('eventLimitTargets').checked;
     await supabaseClient.from('event_target_members').delete().eq('event_id', eventId);
     let targetMemberIds = publicData.members.map(member => member.memberId);
@@ -1607,6 +1607,12 @@ function clearEventForm() {
 function renderEventTargetMemberList() {
   const container = document.getElementById('eventTargetMemberList');
   if (!container) return;
+  const hint = document.getElementById('eventTargetHint');
+  if (hint) {
+    hint.textContent = isAdmin()
+      ? '対象メンバーごとに、その場で出欠を入力しておくこともできます（あとから通常の回答でも変更できます）。'
+      : 'チェックしたメンバーだけがこの予定の対象になります。';
+  }
   const limit = document.getElementById('eventLimitTargets').checked;
   const date = document.getElementById('eventDate').value;
   const autoEligible = date ? getEligibleMembers({ eventId: '__preview__', date }, publicData.members, []) : publicData.members.filter(isActiveRoster);
@@ -1620,15 +1626,18 @@ function renderEventTargetMemberList() {
     const checkboxHtml = limit
       ? `<label class="inline-check"><input type="checkbox" data-target-member="${escapeAttr(member.memberId)}" ${checked ? 'checked' : ''} onchange="toggleEventTargetMember('${escapeAttr(member.memberId)}', this.checked)"> ${escapeHtml(displayName(member))}</label>`
       : `<span>${escapeHtml(displayName(member))}</span>`;
-    return `
-      <div class="event-target-row ${included ? '' : 'is-muted'}">
-        ${checkboxHtml}
+    const preAnswerHtml = isAdmin() ? `
         <select data-preanswer-member="${escapeAttr(member.memberId)}" ${included ? '' : 'disabled'} onchange="eventFormPreAnswers[this.dataset.preanswerMember] = this.value">
           <option value="">未回答</option>
           <option value="参加" ${status === '参加' ? 'selected' : ''}>参加</option>
           <option value="不参加" ${status === '不参加' ? 'selected' : ''}>不参加</option>
           <option value="未定" ${status === '未定' ? 'selected' : ''}>未定</option>
-        </select>
+          <option value="時間限定" ${status === '時間限定' ? 'selected' : ''}>時間限定</option>
+        </select>` : '';
+    return `
+      <div class="event-target-row ${included ? '' : 'is-muted'}">
+        ${checkboxHtml}
+        ${preAnswerHtml}
       </div>`;
   }).join('');
   container.innerHTML = rows || '<p class="muted">メンバーがいません。</p>';

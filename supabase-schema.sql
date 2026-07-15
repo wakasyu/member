@@ -504,12 +504,15 @@ on public.event_target_members for select
 to authenticated
 using (true);
 
+-- スタッフも予定追加時に対象メンバーを絞り込めるようにする
+-- （出欠の代理入力(answers)まではスタッフには許可しない）
 drop policy if exists "event_target_members write admin" on public.event_target_members;
-create policy "event_target_members write admin"
+drop policy if exists "event_target_members write admin or staff" on public.event_target_members;
+create policy "event_target_members write admin or staff"
 on public.event_target_members for all
 to authenticated
-using (public.is_admin())
-with check (public.is_admin());
+using (public.is_admin() or public.is_staff())
+with check (public.is_admin() or public.is_staff());
 
 drop policy if exists "answers read authenticated" on public.answers;
 create policy "answers read authenticated"
