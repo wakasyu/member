@@ -226,11 +226,16 @@ async function submitRegisterForm(event) {
     });
     document.getElementById('registerForm').classList.add('hidden');
     showMessage('registerMessage', '登録が完了しました。メールアドレスとパスワード「password」でログインし、ログイン後は必ずパスワードを変更してください。', true);
+    document.getElementById('registerGoToLoginButton').classList.remove('hidden');
   } catch (error) {
     showMessage('registerMessage', error.message, false);
   } finally {
     restore();
   }
+}
+
+function goToLoginScreen() {
+  window.location.href = window.location.href.split('#')[0].split('?')[0];
 }
 
 async function submitNewPassword(event) {
@@ -268,8 +273,8 @@ async function enterApp(user) {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('passwordResetScreen').classList.add('hidden');
   document.getElementById('appShell').classList.remove('hidden');
-  const roleLabel = isAdmin() ? '管理者' : isStaff() ? 'スタッフ' : 'メンバー';
-  const displayLabel = isStaff() ? (staffDisplayName || 'スタッフ') : (currentProfile.display_name || user.email);
+  const roleLabel = isAdmin() ? '管理者' : isStaff() ? '政やスタッフ' : 'メンバー';
+  const displayLabel = isStaff() ? (staffDisplayName || '政やスタッフ') : (currentProfile.display_name || user.email);
   document.getElementById('userMeta').textContent = `${displayLabel} / ${roleLabel}`;
   renderAdminModeSwitcher();
   document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
@@ -736,6 +741,7 @@ function createEventRowHtml(event) {
         <div class="event-row-actions">
           <div class="counts-inline">${countsHtml}</div>
           <div class="share-actions">
+            ${canAccessAdminPanel() ? `<button type="button" data-edit-event-inline="${escapeAttr(event.eventId)}">編集</button>` : ''}
             <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
           </div>
         </div>
@@ -780,7 +786,7 @@ function createInlineAnswerChipHtml(event, answer) {
   if (status === '未定') {
     extraHtml = `
       <details class="inline-extra-fields"${openAttr}>
-        <summary>詳細を入力（いつ頃わかるか・理由・コメント）</summary>
+        <summary class="visually-hidden">詳細を入力</summary>
         <label>いつまでに分かるか<input type="date" data-pending-until value="${escapeAttr(answer.pendingUntil || '')}"></label>
         <label>理由カテゴリ<select data-reason-category><option value="">選択なし</option>${reasonOptions}</select></label>
         <label>理由詳細<input type="text" data-reason-detail value="${escapeAttr(answer.reasonDetail || '')}"></label>
@@ -791,7 +797,7 @@ function createInlineAnswerChipHtml(event, answer) {
   } else if (status === '不参加') {
     extraHtml = `
       <details class="inline-extra-fields"${openAttr}>
-        <summary>理由を入力</summary>
+        <summary class="visually-hidden">理由を入力</summary>
         <label>理由カテゴリ<select data-reason-category><option value="">選択なし</option>${reasonOptions}</select></label>
         <label>理由詳細<input type="text" data-reason-detail value="${escapeAttr(answer.reasonDetail || '')}"></label>
         <label>コメント<textarea data-comment>${escapeHtml(answer.comment || '')}</textarea></label>
@@ -801,7 +807,7 @@ function createInlineAnswerChipHtml(event, answer) {
   } else if (status === '時間限定') {
     extraHtml = `
       <details class="inline-extra-fields"${openAttr}>
-        <summary>参加できる時間帯を入力</summary>
+        <summary class="visually-hidden">参加できる時間帯を入力</summary>
         <label>開始時刻<input type="time" data-limited-start value="${escapeAttr(answer.limitedStartTime || '')}"></label>
         <label>終了時刻<input type="time" data-limited-end value="${escapeAttr(answer.limitedEndTime || '')}"></label>
         <label>コメント<textarea data-comment>${escapeHtml(answer.comment || '')}</textarea></label>
@@ -810,21 +816,31 @@ function createInlineAnswerChipHtml(event, answer) {
     `;
   }
 
+  const nameHtml = extraHtml
+    ? `<span class="member-name has-details" data-toggle-details title="クリックで詳細を開閉">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>`
+    : `<span class="member-name">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>`;
+
   return `
     <div class="member-chip inline-answer" data-event-token="${escapeAttr(event.answerToken)}" data-member-id="${escapeAttr(answer.memberId)}">
-      <div class="member-head">
-        <span class="member-name">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>
-        <div class="inline-status-buttons">
-          <button type="button" class="status-btn join ${status === '参加' ? 'active' : ''}" data-set-status="参加">参加</button>
-          <button type="button" class="status-btn absent ${status === '不参加' ? 'active' : ''}" data-set-status="不参加">不参加</button>
-          <button type="button" class="status-btn pending ${status === '未定' ? 'active' : ''}" data-set-status="未定">未定</button>
-          <button type="button" class="status-btn limited ${status === '時間限定' ? 'active' : ''}" data-set-status="時間限定">時間限定</button>
-          ${status !== '未回答' ? '<button type="button" class="link-button small" data-clear-status>取消</button>' : ''}
-        </div>
+      <div class="member-head-row1">
+        ${nameHtml}
+        ${status !== '未回答' ? '<button type="button" class="link-button small" data-clear-status>取消</button>' : ''}
+      </div>
+      <div class="inline-status-buttons">
+        <button type="button" class="status-btn join ${status === '参加' ? 'active' : ''}" data-set-status="参加">参加</button>
+        <button type="button" class="status-btn absent ${status === '不参加' ? 'active' : ''}" data-set-status="不参加">不参加</button>
+        <button type="button" class="status-btn pending ${status === '未定' ? 'active' : ''}" data-set-status="未定">未定</button>
+        <button type="button" class="status-btn limited ${status === '時間限定' ? 'active' : ''}" data-set-status="時間限定">時間限定</button>
       </div>
       ${extraHtml}
     </div>
   `;
+}
+
+function toggleInlineDetails(nameEl) {
+  const chip = nameEl.closest('.member-chip');
+  const details = chip ? chip.querySelector('details.inline-extra-fields') : null;
+  if (details) details.open = !details.open;
 }
 
 function renderMemberMode(events, memberId, answerStatus) {
@@ -1256,11 +1272,21 @@ function handleAdminMembersClick(domEvent) {
 
 function handlePublicListClick(domEvent) {
   const copyButton = domEvent.target.closest('[data-copy-share]');
+  const editButton = domEvent.target.closest('[data-edit-event-inline]');
+  const nameToggle = domEvent.target.closest('[data-toggle-details]');
   const statusButton = domEvent.target.closest('[data-set-status]');
   const clearButton = domEvent.target.closest('[data-clear-status]');
   const saveExtraButton = domEvent.target.closest('[data-save-extra]');
   if (copyButton) {
     copyShareText(copyButton.dataset.copyShare, copyButton);
+    return;
+  }
+  if (editButton) {
+    editEvent(editButton.dataset.editEventInline);
+    return;
+  }
+  if (nameToggle) {
+    toggleInlineDetails(nameToggle);
     return;
   }
   const chip = domEvent.target.closest('.inline-answer');

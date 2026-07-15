@@ -21,8 +21,38 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const DEFAULT_PASSWORD = "password";
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const FROM_EMAIL = Deno.env.get("NOTIFY_FROM_EMAIL") ?? "onboarding@resend.dev";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+// 登録メール送信に失敗しても登録自体は完了させたいので、呼び出し側では
+// awaitするが例外は投げない（内部でcatchする）。
+// 注意：Resendは送信ドメイン未認証だと、アカウントの登録メール以外には
+// 送信できない制限があるため、実際に本人へ届くかはドメイン認証状況に依存する。
+async function sendWelcomeEmail(to: string, name: string) {
+  if (!RESEND_API_KEY) return;
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: FROM_EMAIL,
+        to: [to],
+        subject: "[若衆] 登録が完了しました！",
+        text: `${name}さん\n\n登録が完了しました！これから若衆として一緒に頑張っていきましょう！\n\n下記でログインできます。\nメールアドレス：${to}\nパスワード：password\n\n※ログイン後、パスワードは必ず変更してください。`,
+      }),
+    });
+    if (!response.ok) {
+      console.error("welcome email failed", response.status, await response.text());
+    }
+  } catch (error) {
+    console.error("welcome email error", error);
+  }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -145,6 +175,8 @@ Deno.serve(async (req) => {
     member_name: name,
     detail: `email: ${email}`,
   });
+
+  await sendWelcomeEmail(email, name);
 
   return jsonResponse({ ok: true });
 });
