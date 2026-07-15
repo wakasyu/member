@@ -686,13 +686,15 @@ function createEventRowHtml(event) {
           <div class="event-meta-line">${metaParts.join('')}</div>
           ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
         </div>
-        <div class="share-actions">
-          <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
+        <div class="event-row-actions">
+          <div class="counts-inline">${countsHtml}</div>
+          <div class="share-actions">
+            <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
+          </div>
         </div>
       </div>
       <div class="event-row-body">
         <div class="members">${answerHtml || '<div class="muted">回答対象メンバーがいません。</div>'}</div>
-        <div class="counts-inline">${countsHtml}</div>
       </div>
     </article>
   `;

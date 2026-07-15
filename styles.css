@@ -552,8 +552,11 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  margin-bottom: 10px;
 }
 
 .event-row.is-archived {
@@ -564,7 +567,7 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px 16px;
 }
 
@@ -573,11 +576,19 @@ textarea {
   min-width: 0;
 }
 
-.event-row-top .share-actions {
+.event-row-actions {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.event-row-actions .share-actions {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -610,24 +621,14 @@ textarea {
 }
 
 .event-row-body {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  align-items: flex-start;
   margin-top: 4px;
 }
 
-.event-row-body .members {
-  flex: 1 1 320px;
-}
-
 .counts-inline {
-  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
-  align-content: flex-start;
+  justify-content: flex-end;
   gap: 6px;
-  max-width: 220px;
 }
 
 .day-group {
@@ -652,7 +653,7 @@ textarea {
 }
 
 .event-row:last-child {
-  border-bottom: none;
+  margin-bottom: 0;
 }
 
 .event-title {
@@ -690,7 +691,7 @@ textarea {
 
 .members {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 6px;
   align-content: start;
 }
