@@ -463,5 +463,12 @@
   <div id="completionOverlay" class="completion-overlay hidden">
     <div class="completion-badge"></div>
   </div>
+
+  <div id="adminModeSwitcher" class="admin-mode-switcher hidden">
+    <span class="admin-mode-label">表示モード</span>
+    <button type="button" class="admin-mode-btn" data-admin-mode="edit" onclick="setAdminViewMode('edit')" title="通常の管理者としてすべて操作できます">編集</button>
+    <button type="button" class="admin-mode-btn" data-admin-mode="view" onclick="setAdminViewMode('view')" title="管理画面は操作できますが、他メンバーの出欠には触れません">閲覧</button>
+    <button type="button" class="admin-mode-btn" data-admin-mode="member" onclick="setAdminViewMode('member')" title="一般メンバーと同じ見え方になります">メンバー</button>
+  </div>
 </body>
 </html>

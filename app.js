@@ -271,8 +271,9 @@ async function enterApp(user) {
   const roleLabel = isAdmin() ? '管理者' : isStaff() ? 'スタッフ' : 'メンバー';
   const displayLabel = isStaff() ? (staffDisplayName || 'スタッフ') : (currentProfile.display_name || user.email);
   document.getElementById('userMeta').textContent = `${displayLabel} / ${roleLabel}`;
-  document.getElementById('adminTabButton').classList.toggle('hidden', !isAdmin());
-  document.getElementById('eventFormTabButton').classList.toggle('hidden', !(isAdmin() || isStaff()));
+  renderAdminModeSwitcher();
+  document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
+  document.getElementById('eventFormTabButton').classList.toggle('hidden', !(canAccessAdminPanel() || isStaff()));
   ['top', 'answer', 'poll'].forEach(name => {
     const tabButton = document.querySelector(`.tab[data-tab="${name}"]`);
     if (tabButton) tabButton.classList.toggle('hidden', isStaff());
@@ -314,6 +315,50 @@ function isStaff() {
 function getDefaultCreatorName() {
   if (isStaff()) return staffDisplayName || '';
   return currentProfile ? (currentProfile.display_name || '') : '';
+}
+
+// 管理者用の「表示モード」。DBのroleやRLSは一切変えず、画面側の見え方・
+// 操作範囲だけを切り替える表面的な仕組み（管理者本人の誤操作防止・確認用）。
+// 編集：従来通りの管理者。閲覧：管理画面は操作できるが他メンバーの出欠には
+// 触れない。メンバー：一般メンバーと同じ見え方にする。
+let adminViewMode = localStorage.getItem('adminViewMode') || 'edit';
+
+function canAccessAdminPanel() {
+  return isAdmin() && adminViewMode !== 'member';
+}
+
+function canProxyOthers() {
+  return isAdmin() && adminViewMode === 'edit';
+}
+
+function setAdminViewMode(mode) {
+  if (!isAdmin()) return;
+  adminViewMode = mode;
+  localStorage.setItem('adminViewMode', mode);
+  renderAdminModeSwitcher();
+  applyAdminViewModeVisibility();
+  renderPublic();
+  renderAdmin();
+  renderEventTargetMemberList();
+}
+
+function renderAdminModeSwitcher() {
+  const box = document.getElementById('adminModeSwitcher');
+  if (!box) return;
+  box.classList.toggle('hidden', !isAdmin());
+  box.querySelectorAll('.admin-mode-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.adminMode === adminViewMode);
+  });
+}
+
+function applyAdminViewModeVisibility() {
+  document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
+  document.getElementById('eventFormTabButton').classList.toggle('hidden', !(canAccessAdminPanel() || isStaff()));
+  setupPollActingMemberSelect();
+  const activeView = document.querySelector('.view.active');
+  const activeName = activeView ? activeView.id.replace('View', '') : '';
+  if (!canAccessAdminPanel() && activeName === 'admin') switchView('public');
+  if (!(canAccessAdminPanel() || isStaff()) && activeName === 'eventForm') switchView('public');
 }
 
 async function signOut() {
@@ -668,13 +713,13 @@ function createEventRowHtml(event) {
   const locked = isAnswerLocked(event);
 
   const answerHtml = (event.answers || []).map(answer => {
-    const canEdit = !locked && (isAdmin() || answer.memberId === myMemberId);
+    const canEdit = !locked && (canProxyOthers() || answer.memberId === myMemberId);
     return canEdit ? createInlineAnswerChipHtml(event, answer) : createStaticAnswerChipHtml(answer);
   }).join('');
 
   const countsHtml = STATUS_LIST.map(status => `<span class="badge ${statusClass(status)}">${escapeHtml(status)} ${Number(event.counts && event.counts[status] || 0)}</span>`).join('');
 
-  const needsMyAnswer = myMemberId && !isAdmin() && findAnswerForMember(event, myMemberId) && findAnswerForMember(event, myMemberId).status === '未回答';
+  const needsMyAnswer = myMemberId && !canProxyOthers() && findAnswerForMember(event, myMemberId) && findAnswerForMember(event, myMemberId).status === '未回答';
 
   return `
     <article class="event-row ${needsMyAnswer ? 'needs-answer' : ''}">
@@ -872,7 +917,7 @@ function isPastDeadline(event) {
 }
 
 function isAnswerLocked(event) {
-  return isPastDeadline(event) && !isAdmin();
+  return isPastDeadline(event) && !canProxyOthers();
 }
 
 function formatReasonText(answer) {
@@ -972,7 +1017,7 @@ function populateAnswerMemberSelect() {
 }
 
 function getEffectiveMemberId() {
-  if (isAdmin()) {
+  if (canProxyOthers()) {
     const select = document.getElementById('answerMemberSelect');
     return select ? select.value : '';
   }
@@ -998,7 +1043,7 @@ function renderAnswerPage() {
   `;
 
   const memberSelectWrap = document.getElementById('answerMemberFieldWrap');
-  if (isAdmin()) {
+  if (canProxyOthers()) {
     memberSelectWrap.classList.remove('hidden');
     populateAnswerMemberSelect();
   } else {
@@ -1183,7 +1228,7 @@ function setupAdminTables() {
   document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
   document.getElementById('adminPolls').addEventListener('click', handleAdminPollsClick);
   ['startTimeHour', 'startTimeMinute', 'endTimeHour', 'endTimeMinute'].forEach(id => populateTimeSelect(document.getElementById(id)));
-  document.getElementById('eventTargetSection').classList.toggle('hidden', !(isAdmin() || isStaff()));
+  document.getElementById('eventTargetSection').classList.toggle('hidden', !(canAccessAdminPanel() || isStaff()));
   renderEventTargetMemberList();
 }
 
@@ -1308,7 +1353,7 @@ function handleOptionRemoveClick(domEvent) {
 }
 
 function renderAdmin() {
-  if (!isAdmin()) return;
+  if (!canAccessAdminPanel()) return;
   renderAdminEvents();
   renderAdminMembers();
   renderAdminLogs();
@@ -1609,7 +1654,7 @@ function renderEventTargetMemberList() {
   if (!container) return;
   const hint = document.getElementById('eventTargetHint');
   if (hint) {
-    hint.textContent = isAdmin()
+    hint.textContent = canProxyOthers()
       ? '対象メンバーごとに、その場で出欠を入力しておくこともできます（あとから通常の回答でも変更できます）。'
       : 'チェックしたメンバーだけがこの予定の対象になります。';
   }
@@ -1626,7 +1671,7 @@ function renderEventTargetMemberList() {
     const checkboxHtml = limit
       ? `<label class="inline-check"><input type="checkbox" data-target-member="${escapeAttr(member.memberId)}" ${checked ? 'checked' : ''} onchange="toggleEventTargetMember('${escapeAttr(member.memberId)}', this.checked)"> ${escapeHtml(displayName(member))}</label>`
       : `<span>${escapeHtml(displayName(member))}</span>`;
-    const preAnswerHtml = isAdmin() ? `
+    const preAnswerHtml = canProxyOthers() ? `
         <select data-preanswer-member="${escapeAttr(member.memberId)}" ${included ? '' : 'disabled'} onchange="eventFormPreAnswers[this.dataset.preanswerMember] = this.value">
           <option value="">未回答</option>
           <option value="参加" ${status === '参加' ? 'selected' : ''}>参加</option>
@@ -1788,8 +1833,8 @@ async function appendLog(action, eventId, eventName, memberId, memberName, oldSt
 }
 
 function switchView(name) {
-  if (name === 'admin' && !isAdmin()) return;
-  if (name === 'eventForm' && !isAdmin() && !isStaff()) return;
+  if (name === 'admin' && !canAccessAdminPanel()) return;
+  if (name === 'eventForm' && !canAccessAdminPanel() && !isStaff()) return;
   if (isStaff() && ['top', 'answer', 'poll'].includes(name)) return;
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
   document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
@@ -2301,7 +2346,7 @@ async function onPollSelectChange() {
 function setupPollActingMemberSelect() {
   const wrap = document.getElementById('pollActingMemberWrap');
   if (!wrap) return;
-  if (!isAdmin()) {
+  if (!canProxyOthers()) {
     wrap.classList.add('hidden');
     return;
   }
@@ -2321,7 +2366,7 @@ function onPollActingMemberChange() {
 }
 
 function getPollActingMemberId() {
-  if (isAdmin() && pollActingMemberId) return pollActingMemberId;
+  if (canProxyOthers() && pollActingMemberId) return pollActingMemberId;
   return currentProfile ? currentProfile.member_id : null;
 }
 

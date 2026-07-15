@@ -1314,6 +1314,63 @@ body.top-active .top-hero-stat.clickable:hover {
   transform: scale(1);
 }
 
+.admin-mode-switcher {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .92);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(18, 59, 110, .18);
+  backdrop-filter: blur(6px);
+}
+
+.admin-mode-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  padding-left: 6px;
+  white-space: nowrap;
+}
+
+.admin-mode-btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.admin-mode-btn.active {
+  background: var(--main);
+  border-color: var(--main);
+  color: #fff;
+}
+
+@media (max-width: 600px) {
+  .admin-mode-label {
+    display: none;
+  }
+
+  .admin-mode-switcher {
+    right: 10px;
+    bottom: 10px;
+    padding: 6px;
+  }
+
+  .admin-mode-btn {
+    padding: 6px 9px;
+  }
+}
+
 @media (max-width: 920px) {
   .shell {
     padding: 12px;
