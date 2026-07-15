@@ -17,40 +17,44 @@
 //      … メンバー行の新規作成＋アカウント作成
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const DEFAULT_PASSWORD = "password";
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const FROM_EMAIL = Deno.env.get("NOTIFY_FROM_EMAIL") ?? "onboarding@resend.dev";
+const GMAIL_USER = Deno.env.get("GMAIL_USER") ?? "";
+const GMAIL_APP_PASSWORD = Deno.env.get("GMAIL_APP_PASSWORD") ?? "";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 // 登録メール送信に失敗しても登録自体は完了させたいので、呼び出し側では
 // awaitするが例外は投げない（内部でcatchする）。
-// 注意：Resendは送信ドメイン未認証だと、アカウントの登録メール以外には
-// 送信できない制限があるため、実際に本人へ届くかはドメイン認証状況に依存する。
+// GmailのSMTP（アプリパスワード認証）経由で送るので、Resendのような
+// 送信ドメイン未認証時の宛先制限を受けず、本人のメールアドレス宛に届く。
 async function sendWelcomeEmail(to: string, name: string) {
-  if (!RESEND_API_KEY) return;
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return;
+  const client = new SMTPClient({
+    connection: {
+      hostname: "smtp.gmail.com",
+      port: 465,
+      tls: true,
+      auth: {
+        username: GMAIL_USER,
+        password: GMAIL_APP_PASSWORD,
       },
-      body: JSON.stringify({
-        from: FROM_EMAIL,
-        to: [to],
-        subject: "[若衆] 登録が完了しました！",
-        text: `${name}さん\n\n登録が完了しました！これから若衆として一緒に頑張っていきましょう！\n\n下記でログインできます。\nメールアドレス：${to}\nパスワード：password\n\n※ログイン後、パスワードは必ず変更してください。`,
-      }),
+    },
+  });
+  try {
+    await client.send({
+      from: GMAIL_USER,
+      to,
+      subject: "[若衆] 登録が完了しました！",
+      content: `${name}さん\n\n登録が完了しました！これから若衆として一緒に頑張っていきましょう！\n\n下記でログインできます。\nメールアドレス：${to}\nパスワード：password\n\n※ログイン後、パスワードは必ず変更してください。`,
     });
-    if (!response.ok) {
-      console.error("welcome email failed", response.status, await response.text());
-    }
   } catch (error) {
     console.error("welcome email error", error);
+  } finally {
+    await client.close().catch(() => {});
   }
 }
 
