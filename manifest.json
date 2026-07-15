@@ -1,0 +1,16 @@
+{
+  "name": "若衆メンバー専用サイト",
+  "short_name": "若衆",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1d4f8f",
+  "theme_color": "#1d4f8f",
+  "icons": [
+    {
+      "src": "./logo.jpg",
+      "sizes": "1080x1080",
+      "type": "image/jpeg"
+    }
+  ]
+}

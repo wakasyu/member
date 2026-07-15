@@ -1,4 +1,4 @@
-const STATUS_LIST = ['参加', '不参加', '未定', '未回答'];
+const STATUS_LIST = ['参加', '不参加', '未定', '時間限定', '未回答'];
 
 let supabaseClient = null;
 let sessionUser = null;
@@ -525,7 +525,9 @@ function buildPublicEvent(event, members, answers, targetOverrides) {
       pendingUntil: answer ? normalizeDate(answer.pending_until) : '',
       comment: answer ? answer.comment || '' : '',
       reasonCategory: answer ? answer.reason_category || '' : '',
-      reasonDetail: answer ? answer.reason_detail || '' : ''
+      reasonDetail: answer ? answer.reason_detail || '' : '',
+      limitedStartTime: answer ? normalizeTime(answer.limited_start_time) : '',
+      limitedEndTime: answer ? normalizeTime(answer.limited_end_time) : ''
     };
   });
   const counts = STATUS_LIST.reduce((acc, status) => {
@@ -700,13 +702,20 @@ function createEventRowHtml(event) {
   `;
 }
 
+function formatLimitedTimeRange(answer) {
+  if (!answer.limitedStartTime && !answer.limitedEndTime) return '';
+  return `${answer.limitedStartTime || '？'} - ${answer.limitedEndTime || '？'}`;
+}
+
 function createStaticAnswerChipHtml(answer) {
+  const timeRangeText = formatLimitedTimeRange(answer);
   return `
     <div class="member-chip">
       <div class="member-head">
         <span class="member-name">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>
         <span class="badge ${statusClass(answer.status)}">${escapeHtml(answer.status)}</span>
       </div>
+      ${timeRangeText ? `<div class="comment">参加可能時間：${escapeHtml(timeRangeText)}</div>` : ''}
       ${answer.pendingUntil ? `<div class="comment">判明予定：${escapeHtml(formatDate(answer.pendingUntil))}</div>` : ''}
       ${answer.comment ? `<div class="comment">コメント：${escapeHtml(answer.comment)}</div>` : ''}
       ${formatReasonText(answer) ? `<div class="comment">理由：${escapeHtml(formatReasonText(answer))}</div>` : ''}
@@ -716,10 +725,45 @@ function createStaticAnswerChipHtml(answer) {
 
 function createInlineAnswerChipHtml(event, answer) {
   const status = answer.status;
-  const showExtra = status === '未定';
   const reasonOptions = reasonCategoryOptions.map(option =>
     `<option value="${escapeAttr(option.label)}" ${answer.reasonCategory === option.label ? 'selected' : ''}>${escapeHtml(option.label)}</option>`
   ).join('');
+  const hasDetail = Boolean(answer.pendingUntil || answer.reasonCategory || answer.reasonDetail || answer.comment || answer.limitedStartTime || answer.limitedEndTime);
+  const openAttr = hasDetail ? ' open' : '';
+
+  let extraHtml = '';
+  if (status === '未定') {
+    extraHtml = `
+      <details class="inline-extra-fields"${openAttr}>
+        <summary>詳細を入力（いつ頃わかるか・理由・コメント）</summary>
+        <label>いつまでに分かるか<input type="date" data-pending-until value="${escapeAttr(answer.pendingUntil || '')}"></label>
+        <label>理由カテゴリ<select data-reason-category><option value="">選択なし</option>${reasonOptions}</select></label>
+        <label>理由詳細<input type="text" data-reason-detail value="${escapeAttr(answer.reasonDetail || '')}"></label>
+        <label>コメント<textarea data-comment>${escapeHtml(answer.comment || '')}</textarea></label>
+        <button type="button" class="small" data-save-extra>保存</button>
+      </details>
+    `;
+  } else if (status === '不参加') {
+    extraHtml = `
+      <details class="inline-extra-fields"${openAttr}>
+        <summary>理由を入力</summary>
+        <label>理由カテゴリ<select data-reason-category><option value="">選択なし</option>${reasonOptions}</select></label>
+        <label>理由詳細<input type="text" data-reason-detail value="${escapeAttr(answer.reasonDetail || '')}"></label>
+        <label>コメント<textarea data-comment>${escapeHtml(answer.comment || '')}</textarea></label>
+        <button type="button" class="small" data-save-extra>保存</button>
+      </details>
+    `;
+  } else if (status === '時間限定') {
+    extraHtml = `
+      <details class="inline-extra-fields"${openAttr}>
+        <summary>参加できる時間帯を入力</summary>
+        <label>開始時刻<input type="time" data-limited-start value="${escapeAttr(answer.limitedStartTime || '')}"></label>
+        <label>終了時刻<input type="time" data-limited-end value="${escapeAttr(answer.limitedEndTime || '')}"></label>
+        <label>コメント<textarea data-comment>${escapeHtml(answer.comment || '')}</textarea></label>
+        <button type="button" class="small" data-save-extra>保存</button>
+      </details>
+    `;
+  }
 
   return `
     <div class="member-chip inline-answer" data-event-token="${escapeAttr(event.answerToken)}" data-member-id="${escapeAttr(answer.memberId)}">
@@ -729,16 +773,11 @@ function createInlineAnswerChipHtml(event, answer) {
           <button type="button" class="status-btn join ${status === '参加' ? 'active' : ''}" data-set-status="参加">参加</button>
           <button type="button" class="status-btn absent ${status === '不参加' ? 'active' : ''}" data-set-status="不参加">不参加</button>
           <button type="button" class="status-btn pending ${status === '未定' ? 'active' : ''}" data-set-status="未定">未定</button>
+          <button type="button" class="status-btn limited ${status === '時間限定' ? 'active' : ''}" data-set-status="時間限定">時間限定</button>
           ${status !== '未回答' ? '<button type="button" class="link-button small" data-clear-status>取消</button>' : ''}
         </div>
       </div>
-      <div class="inline-extra-fields ${showExtra ? '' : 'hidden'}">
-        <label>いつまでに分かるか<input type="date" data-pending-until value="${escapeAttr(answer.pendingUntil || '')}"></label>
-        <label>理由カテゴリ<select data-reason-category><option value="">選択なし</option>${reasonOptions}</select></label>
-        <label>理由詳細<input type="text" data-reason-detail value="${escapeAttr(answer.reasonDetail || '')}"></label>
-        <label>コメント<textarea data-comment>${escapeHtml(answer.comment || '')}</textarea></label>
-        <button type="button" class="small" data-save-extra>保存</button>
-      </div>
+      ${extraHtml}
     </div>
   `;
 }
@@ -846,7 +885,10 @@ function findAnswerForMember(event, memberId) {
 }
 
 function groupEventsByMemberStatus(events, memberId, answerStatus) {
-  const grouped = { '参加': [], '不参加': [], '未定': [], '未回答': [] };
+  const grouped = STATUS_LIST.reduce((acc, status) => {
+    acc[status] = [];
+    return acc;
+  }, {});
   events.forEach(event => {
     const answer = findAnswerForMember(event, memberId);
     if (!answer) return;
@@ -992,6 +1034,8 @@ function renderAnswerPage() {
   const answer = (answerData.answers || []).find(item => item.memberId === memberId);
   document.getElementById('answerStatusSelect').value = answer && answer.status !== '未回答' ? answer.status : '';
   document.getElementById('pendingUntil').value = answer ? answer.pendingUntil || '' : '';
+  document.getElementById('limitedStartTime').value = answer ? answer.limitedStartTime || '' : '';
+  document.getElementById('limitedEndTime').value = answer ? answer.limitedEndTime || '' : '';
   document.getElementById('answerComment').value = answer ? answer.comment || '' : '';
   document.getElementById('answerReasonCategory').value = answer ? answer.reasonCategory || '' : '';
   document.getElementById('answerReason').value = answer ? answer.reasonDetail || '' : '';
@@ -1001,7 +1045,7 @@ function renderAnswerPage() {
 }
 
 function setAnswerFormDisabled(disabled) {
-  ['answerStatusSelect', 'pendingUntil', 'answerReasonCategory', 'answerReason', 'answerComment', 'submitAnswerButton'].forEach(id => {
+  ['answerStatusSelect', 'pendingUntil', 'limitedStartTime', 'limitedEndTime', 'answerReasonCategory', 'answerReason', 'answerComment', 'submitAnswerButton'].forEach(id => {
     const element = document.getElementById(id);
     if (element) element.disabled = disabled;
   });
@@ -1039,6 +1083,8 @@ async function submitAnswer() {
     member_id: memberId,
     status,
     pending_until: status === '未定' ? nullIfEmpty(document.getElementById('pendingUntil').value) : null,
+    limited_start_time: status === '時間限定' ? nullIfEmpty(document.getElementById('limitedStartTime').value) : null,
+    limited_end_time: status === '時間限定' ? nullIfEmpty(document.getElementById('limitedEndTime').value) : null,
     comment: document.getElementById('answerComment').value.trim(),
     reason_category: document.getElementById('answerReasonCategory').value,
     reason_detail: document.getElementById('answerReason').value.trim(),
@@ -1107,7 +1153,10 @@ async function clearAnswer() {
 }
 
 function updatePendingVisibility() {
-  document.getElementById('pendingField').classList.toggle('hidden', document.getElementById('answerStatusSelect').value !== '未定');
+  const status = document.getElementById('answerStatusSelect').value;
+  document.getElementById('pendingField').classList.toggle('hidden', status !== '未定');
+  document.getElementById('limitedStartField').classList.toggle('hidden', status !== '時間限定');
+  document.getElementById('limitedEndField').classList.toggle('hidden', status !== '時間限定');
 }
 
 function setupAdminForms() {
@@ -1179,11 +1228,19 @@ function handlePublicListClick(domEvent) {
     clearInlineAnswer(eventToken, memberId);
   } else if (saveExtraButton) {
     const status = chip.querySelector('.status-btn.active')?.dataset.setStatus || '未定';
+    const pendingEl = chip.querySelector('[data-pending-until]');
+    const reasonCategoryEl = chip.querySelector('[data-reason-category]');
+    const reasonDetailEl = chip.querySelector('[data-reason-detail]');
+    const commentEl = chip.querySelector('[data-comment]');
+    const limitedStartEl = chip.querySelector('[data-limited-start]');
+    const limitedEndEl = chip.querySelector('[data-limited-end]');
     submitInlineAnswer(eventToken, memberId, status, {
-      pendingUntil: chip.querySelector('[data-pending-until]').value,
-      reasonCategory: chip.querySelector('[data-reason-category]').value,
-      reasonDetail: chip.querySelector('[data-reason-detail]').value,
-      comment: chip.querySelector('[data-comment]').value
+      pendingUntil: pendingEl ? pendingEl.value : '',
+      reasonCategory: reasonCategoryEl ? reasonCategoryEl.value : '',
+      reasonDetail: reasonDetailEl ? reasonDetailEl.value : '',
+      comment: commentEl ? commentEl.value : '',
+      limitedStartTime: limitedStartEl ? limitedStartEl.value : '',
+      limitedEndTime: limitedEndEl ? limitedEndEl.value : ''
     });
   }
 }
@@ -1204,6 +1261,8 @@ async function submitInlineAnswer(eventToken, memberId, status, extra) {
     comment: (extra && extra.comment) ? extra.comment.trim() : '',
     reason_category: (extra && extra.reasonCategory) || '',
     reason_detail: (extra && extra.reasonDetail) ? extra.reasonDetail.trim() : '',
+    limited_start_time: status === '時間限定' ? nullIfEmpty(extra && extra.limitedStartTime) : null,
+    limited_end_time: status === '時間限定' ? nullIfEmpty(extra && extra.limitedEndTime) : null,
     updated_at: new Date().toISOString()
   };
 
@@ -1878,6 +1937,14 @@ function renderTopHighlights() {
   const pendingBox = document.getElementById('topPendingAnswers');
   if (!nextBox || !pendingBox) return;
 
+  if (isStaff()) {
+    nextBox.classList.add('hidden');
+    pendingBox.classList.add('hidden');
+    return;
+  }
+  nextBox.classList.remove('hidden');
+  pendingBox.classList.remove('hidden');
+
   const upcoming = publicData.events
     .filter(event => event.publicState !== '削除' && !isPastEvent(event))
     .sort(compareEvents);
@@ -1986,6 +2053,7 @@ function statusClass(status) {
   if (status === '参加') return 'join';
   if (status === '不参加') return 'absent';
   if (status === '未定') return 'pending';
+  if (status === '時間限定') return 'limited';
   return 'none';
 }
 

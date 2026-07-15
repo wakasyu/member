@@ -20,6 +20,8 @@
   --pen: #92400e;
   --none-bg: #e5e7eb;
   --none: #374151;
+  --limited-bg: #dbeafe;
+  --limited: #1d4ed8;
 }
 
 * {
@@ -251,8 +253,15 @@ textarea {
 
 .form-footer-links {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  align-items: center;
+  gap: 14px;
   margin-top: 12px;
+}
+
+.form-footer-links .footer-link-divider {
+  color: var(--border);
 }
 
 .form-footer-links button {
@@ -769,6 +778,11 @@ textarea {
   color: var(--pen);
 }
 
+.badge.limited {
+  background: var(--limited-bg);
+  color: var(--limited);
+}
+
 .inline-status-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -805,12 +819,25 @@ textarea {
   color: var(--pen);
 }
 
+.status-btn.limited.active {
+  background: var(--limited-bg);
+  border-color: var(--limited);
+  color: var(--limited);
+}
+
 .inline-extra-fields {
   display: grid;
   gap: 6px;
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px dashed var(--border);
+}
+
+.inline-extra-fields summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--main-2);
 }
 
 .inline-extra-fields label {

@@ -220,6 +220,37 @@ create table if not exists public.answers (
   unique (event_id, member_id)
 );
 
+-- 「時間限定なら参加できる」という回答区分。開始・終了時刻を持たせる。
+alter table public.answers add column if not exists limited_start_time time null;
+alter table public.answers add column if not exists limited_end_time time null;
+
+do $$
+declare
+  con_name text;
+begin
+  select conname into con_name
+  from pg_constraint
+  where conrelid = 'public.answers'::regclass
+    and contype = 'c'
+    and pg_get_constraintdef(oid) ilike '%status%'
+    and pg_get_constraintdef(oid) not ilike '%時間限定%'
+  limit 1;
+  if con_name is not null then
+    execute format('alter table public.answers drop constraint %I', con_name);
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.answers'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%status%'
+      and pg_get_constraintdef(oid) ilike '%時間限定%'
+  ) then
+    alter table public.answers add constraint answers_status_check
+      check (status in ('参加', '不参加', '未定', '時間限定', '未回答'));
+  end if;
+end;
+$$;
+
 -- 理由を「カテゴリ：詳細」の1文字列に押し込めると、自由入力欄にたまたま
 -- カテゴリ名を書かれた場合に再表示時の解析を誤るため、カラムを分ける。
 -- 旧`reason`列は過去データ保持のため残すが、アプリからは読み書きしない。

@@ -6,6 +6,9 @@
   <title>若衆メンバー専用サイト</title>
   <link rel="stylesheet" href="./styles.css">
   <link rel="icon" href="./logo.jpg">
+  <link rel="apple-touch-icon" href="./logo.jpg">
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#1d4f8f">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
   <script defer src="./app.js"></script>
@@ -30,6 +33,7 @@
       </form>
       <div class="form-footer-links">
         <button id="forgotPasswordButton" class="link-button" type="button">パスワードをお忘れですか？</button>
+        <span class="footer-link-divider" aria-hidden="true">｜</span>
         <button id="staffLoginToggle" class="link-button" type="button" onclick="toggleStaffLoginForm()">スタッフとしてログイン</button>
       </div>
       <form id="staffLoginForm" class="form-stack hidden">
@@ -170,6 +174,7 @@
                 <option value="参加">参加</option>
                 <option value="不参加">不参加</option>
                 <option value="未定">未定</option>
+                <option value="時間限定">時間限定</option>
                 <option value="未回答">未回答</option>
               </select>
             </span>
@@ -206,11 +211,20 @@
                 <option value="参加">参加</option>
                 <option value="不参加">不参加</option>
                 <option value="未定">未定</option>
+                <option value="時間限定">時間限定</option>
               </select>
             </label>
             <label id="pendingField" class="hidden">
               いつまでに分かるか
               <input id="pendingUntil" type="date">
+            </label>
+            <label id="limitedStartField" class="hidden">
+              参加できる開始時刻
+              <input id="limitedStartTime" type="time">
+            </label>
+            <label id="limitedEndField" class="hidden">
+              参加できる終了時刻
+              <input id="limitedEndTime" type="time">
             </label>
             <label>
               理由カテゴリ
