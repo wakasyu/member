@@ -16,6 +16,7 @@ const STAFF_LOGIN_EMAIL = 'staff@wakasyu.local';
 let staffDisplayName = sessionStorage.getItem('staffDisplayName') || '';
 
 let eventFormTargetMemberIds = null;
+let eventFormTargetTouched = false;
 let eventFormPreAnswers = {};
 
 let availabilityPolls = [];
@@ -1577,15 +1578,10 @@ async function saveEventForm() {
   }
 
   if (isAdmin() || isStaff()) {
-    const limitTargets = document.getElementById('eventLimitTargets').checked;
     await supabaseClient.from('event_target_members').delete().eq('event_id', eventId);
-    let targetMemberIds = publicData.members.map(member => member.memberId);
-    if (limitTargets) {
-      const checked = Array.from(document.querySelectorAll('#eventTargetMemberList [data-target-member]:checked')).map(el => el.dataset.targetMember);
-      targetMemberIds = checked;
-      if (checked.length) {
-        await supabaseClient.from('event_target_members').insert(checked.map(memberId => ({ event_id: eventId, member_id: memberId })));
-      }
+    const targetMemberIds = Array.from(document.querySelectorAll('#eventTargetMemberList [data-target-member]:checked')).map(el => el.dataset.targetMember);
+    if (targetMemberIds.length) {
+      await supabaseClient.from('event_target_members').insert(targetMemberIds.map(memberId => ({ event_id: eventId, member_id: memberId })));
     }
 
     const preAnswerEntries = Array.from(document.querySelectorAll('#eventTargetMemberList [data-preanswer-member]'))
@@ -1621,8 +1617,8 @@ function editEvent(eventId) {
   setTimeSelectValue('endTime', event.endTime || '');
   document.getElementById('place').value = event.place || '';
   const overrides = publicData.eventTargetOverrides.filter(row => row.event_id === event.eventId);
-  document.getElementById('eventLimitTargets').checked = overrides.length > 0;
   eventFormTargetMemberIds = overrides.length ? new Set(overrides.map(row => row.member_id)) : null;
+  eventFormTargetTouched = overrides.length > 0;
   eventFormPreAnswers = {};
   (event.answers || []).forEach(answer => {
     if (answer.status && answer.status !== '未回答') eventFormPreAnswers[answer.memberId] = answer.status;
@@ -1669,8 +1665,8 @@ function clearEventForm() {
   setTimeSelectValue('endTime', '');
   document.getElementById('eventCategory').value = '';
   document.getElementById('creator').value = getDefaultCreatorName();
-  document.getElementById('eventLimitTargets').checked = false;
   eventFormTargetMemberIds = null;
+  eventFormTargetTouched = false;
   eventFormPreAnswers = {};
   renderEventTargetMemberList();
 }
@@ -1681,24 +1677,21 @@ function renderEventTargetMemberList() {
   const hint = document.getElementById('eventTargetHint');
   if (hint) {
     hint.textContent = canProxyOthers()
-      ? '対象メンバーごとに、その場で出欠を入力しておくこともできます（あとから通常の回答でも変更できます）。'
+      ? 'チェックしたメンバーが対象になります。対象メンバーごとに、その場で出欠を入力しておくこともできます（あとから通常の回答でも変更できます）。'
       : 'チェックしたメンバーだけがこの予定の対象になります。';
   }
-  const limit = document.getElementById('eventLimitTargets').checked;
   const date = document.getElementById('eventDate').value;
   const autoEligible = date ? getEligibleMembers({ eventId: '__preview__', date }, publicData.members, []) : publicData.members.filter(isActiveRoster);
   const autoIds = new Set(autoEligible.map(member => member.memberId));
-  const checkedIds = limit && eventFormTargetMemberIds ? eventFormTargetMemberIds : autoIds;
+  // 一度も手動でチェックを変えていない間は、日付の変更に合わせて自動判定の
+  // プレビューを常に最新化する。一度でも手動で変えたら、その内容を保持する。
+  const checkedIds = eventFormTargetTouched && eventFormTargetMemberIds ? eventFormTargetMemberIds : autoIds;
 
   const rows = publicData.members.filter(isActiveRoster).map(member => {
     const checked = checkedIds.has(member.memberId);
     const status = eventFormPreAnswers[member.memberId] || '';
-    const included = limit ? checked : true;
-    const checkboxHtml = limit
-      ? `<label class="inline-check"><input type="checkbox" data-target-member="${escapeAttr(member.memberId)}" ${checked ? 'checked' : ''} onchange="toggleEventTargetMember('${escapeAttr(member.memberId)}', this.checked)"> ${escapeHtml(displayName(member))}</label>`
-      : `<span>${escapeHtml(displayName(member))}</span>`;
     const preAnswerHtml = canProxyOthers() ? `
-        <select data-preanswer-member="${escapeAttr(member.memberId)}" ${included ? '' : 'disabled'} onchange="eventFormPreAnswers[this.dataset.preanswerMember] = this.value">
+        <select data-preanswer-member="${escapeAttr(member.memberId)}" ${checked ? '' : 'disabled'} onchange="eventFormPreAnswers[this.dataset.preanswerMember] = this.value">
           <option value="">未回答</option>
           <option value="参加" ${status === '参加' ? 'selected' : ''}>参加</option>
           <option value="不参加" ${status === '不参加' ? 'selected' : ''}>不参加</option>
@@ -1706,20 +1699,22 @@ function renderEventTargetMemberList() {
           <option value="時間限定" ${status === '時間限定' ? 'selected' : ''}>時間限定</option>
         </select>` : '';
     return `
-      <div class="event-target-row ${included ? '' : 'is-muted'}">
-        ${checkboxHtml}
+      <div class="event-target-row ${checked ? '' : 'is-muted'}">
+        <label class="inline-check"><input type="checkbox" data-target-member="${escapeAttr(member.memberId)}" ${checked ? 'checked' : ''} onchange="toggleEventTargetMember('${escapeAttr(member.memberId)}', this.checked)"> ${escapeHtml(displayName(member))}</label>
         ${preAnswerHtml}
       </div>`;
   }).join('');
   container.innerHTML = rows || '<p class="muted">メンバーがいません。</p>';
-
-  if (limit && !eventFormTargetMemberIds) {
-    eventFormTargetMemberIds = new Set(autoIds);
-  }
 }
 
 function toggleEventTargetMember(memberId, checked) {
-  if (!eventFormTargetMemberIds) eventFormTargetMemberIds = new Set();
+  if (!eventFormTargetTouched) {
+    // 初めての手動操作。ここまでの自動判定結果を土台として引き継ぐ
+    const date = document.getElementById('eventDate').value;
+    const autoEligible = date ? getEligibleMembers({ eventId: '__preview__', date }, publicData.members, []) : publicData.members.filter(isActiveRoster);
+    eventFormTargetMemberIds = new Set(autoEligible.map(member => member.memberId));
+    eventFormTargetTouched = true;
+  }
   if (checked) eventFormTargetMemberIds.add(memberId);
   else eventFormTargetMemberIds.delete(memberId);
   renderEventTargetMemberList();
