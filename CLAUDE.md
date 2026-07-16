@@ -85,9 +85,9 @@
 
 - `supabase-schema.sql` は繰り返し実行安全。**このファイルを更新したら
   Supabase側でSQL Editorで再実行してもらう必要がある**（自動デプロイの
-  仕組みは無い）。直近では`event_target_members`テーブル、`profiles.role`への
-  `staff`追加、`is_staff()`、`answers.limited_start_time`/`limited_end_time`列と
-  statusのcheck制約更新などを追加した。**再実行済みか未確認。**
+  仕組みは無い）。2026-07-16時点の内容（`event_target_members`テーブル、
+  `profiles.role`への`staff`追加、`is_staff()`、`answers.limited_start_time`/
+  `limited_end_time`列とstatusのcheck制約更新を含む）まで実行済みを確認。
 - Storageバケット `top-photos`：非公開。RLSで「認証済みなら閲覧可、
   書き込みは管理者のみ」。
 - Edge Function `notify-answer`：デプロイ・secrets設定済み（動作確認済み）。
@@ -105,8 +105,6 @@
 
 ## 未確認・保留中の項目
 
-- **`supabase-schema.sql`の再実行が済んでいるか未確認**（上記の新しい
-  テーブル・列・制約が反映されているか）
 - 「理由カテゴリが分類管理画面から追加できない」という報告：原因が
   コード上は見当たらず、再現待ち（実際のエラーメッセージ待ち）
 - スタッフ用の共通Supabaseアカウントを作成済みか未確認。未作成なら
