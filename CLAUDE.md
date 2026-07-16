@@ -48,8 +48,10 @@
 - メンバー自己登録：管理画面から「新規メンバー登録リンクを発行」すると、
   リンクを開いた本人がログイン不要で名前・連絡先・メールアドレス等を入力するだけで
   membersテーブルの行が新規作成され、Supabase Authアカウントも作られる
-  （初期パスワード固定「password」、ログイン後に本人が変更する運用）。
-  登録完了時にGmail SMTP経由でお祝いメールを送信
+  （初期パスワードは登録の都度ランダム発行し、登録直後の画面とメールにのみ表示。
+  ログイン時`user_metadata.must_change_password`が立っているとアプリ本体に
+  入れず強制的にパスワード変更画面へ誘導する。旧固定パスワード「password」は
+  廃止済み）。登録完了時にGmail SMTP経由でお祝いメールを送信
 - トップページ：Storageの非公開バケット（`top-photos`）から写真を取得し
   全画面背景でスライドショー表示。次の予定・自分の未回答件数はタブと同じ行に
   ピル表示（写真を邪魔しない）
@@ -98,10 +100,13 @@
   書き込みは管理者のみ」。
 - Edge Function `notify-answer`：デプロイ・secrets設定済み（動作確認済み）。
   `RESEND_API_KEY` / `ADMIN_NOTIFY_EMAIL` / `NOTIFY_FROM_EMAIL` / `WEBHOOK_SECRET`。
-- Edge Function `register-member`：デプロイ・動作確認済み。登録完了メールは
+- Edge Function `register-member`：登録完了メールは
   Resendではなく **Gmail SMTP**（`GMAIL_USER` / `GMAIL_APP_PASSWORD` secrets、
   denomailer経由）で送信するよう変更済み（Resendは送信ドメイン未認証だと
-  任意の宛先に送れないため）。
+  任意の宛先に送れないため）。**2026-07-17に初期パスワード発行ロジックと
+  招待トークンの排他制御を変更したため、`supabase functions deploy
+  register-member --no-verify-jwt` の再デプロイがまだ済んでいない
+  （このセッションではコード変更のみ・デプロイは未実施）。**
 - Resendは無料枠でドメイン未認証のため、`ADMIN_NOTIFY_EMAIL`に設定した
   アカウント登録メール以外には送信できない（notify-answer用。register-member
   の方は上記の通りGmail SMTPに切り替え済みなのでこの制限を受けない）。

@@ -10,6 +10,8 @@ let categoryOptions = [];
 let reasonCategoryOptions = [];
 let realtimeChannel = null;
 let refreshTimer = null;
+let optionsRefreshTimer = null;
+let pollsListRefreshTimer = null;
 let adminTablesBound = false;
 const messageTimers = new Map();
 const STAFF_LOGIN_EMAIL = 'staff@wakasyu.local';
@@ -162,10 +164,16 @@ async function requestPasswordReset() {
   showMessage('loginMessage', 'パスワード再設定用のメールを送信しました。メール内のリンクから設定してください。', true);
 }
 
-function showPasswordResetScreen() {
+let forcedPasswordChangeUser = null;
+
+function showPasswordResetScreen(forced) {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('appShell').classList.add('hidden');
   document.getElementById('passwordResetScreen').classList.remove('hidden');
+  document.getElementById('passwordResetHeading').textContent = forced ? '初期パスワードの変更' : '新しいパスワードを設定';
+  document.getElementById('passwordResetIntro').textContent = forced
+    ? '登録時に発行された初期パスワードのままです。安全のため、ご自身のパスワードに変更してください。'
+    : 'メールのリンクから開いています。新しいパスワードを入力してください。';
 }
 
 let currentRegisterToken = '';
@@ -212,7 +220,7 @@ async function submitRegisterForm(event) {
   const button = document.getElementById('submitRegisterButton');
   const restore = setButtonBusy(button, '登録中...');
   try {
-    await callEdgeFunction('register-member', {
+    const result = await callEdgeFunction('register-member', {
       method: 'POST',
       body: JSON.stringify({
         token: currentRegisterToken,
@@ -226,7 +234,12 @@ async function submitRegisterForm(event) {
       })
     });
     document.getElementById('registerForm').classList.add('hidden');
-    showMessage('registerMessage', '登録が完了しました。メールアドレスとパスワード「password」でログインし、ログイン後は必ずパスワードを変更してください。', true);
+    // パスワードはこのレスポンス（登録した本人の画面）にしか出てこない値。
+    // メール未設定の環境でもこれで必ず初期パスワードを確認できるようにする。
+    const passwordNotice = result && result.password
+      ? `初期パスワードは「${result.password}」です（このパスワードは他の人に共有しないでください）。`
+      : '設定されたメールアドレス宛てに初期パスワードを送信しました。';
+    showMessage('registerMessage', `登録が完了しました。${passwordNotice}ログイン後、パスワード変更画面が表示されます。`, true);
     document.getElementById('registerGoToLoginButton').classList.remove('hidden');
   } catch (error) {
     showMessage('registerMessage', error.message, false);
@@ -255,12 +268,23 @@ async function submitNewPassword(event) {
 
   const button = document.getElementById('submitNewPasswordButton');
   const restore = setButtonBusy(button, '更新中...');
-  const { error } = await supabaseClient.auth.updateUser({ password });
+  const forcedUser = forcedPasswordChangeUser;
+  const updatePayload = forcedUser ? { password, data: { must_change_password: false } } : { password };
+  const { data, error } = await supabaseClient.auth.updateUser(updatePayload);
   restore();
   if (error) {
     showMessage('passwordResetMessage', `更新に失敗しました：${error.message}`, false);
     return;
   }
+
+  if (forcedUser) {
+    // 登録直後の強制変更フローでは、そのままログイン状態を維持してアプリへ進む
+    forcedPasswordChangeUser = null;
+    showMessage('passwordResetMessage', 'パスワードを更新しました。', true);
+    await enterApp(data.user || forcedUser);
+    return;
+  }
+
   showMessage('passwordResetMessage', 'パスワードを更新しました。ログイン画面に戻ります。', true);
   await supabaseClient.auth.signOut();
   setTimeout(() => {
@@ -269,6 +293,13 @@ async function submitNewPassword(event) {
 }
 
 async function enterApp(user) {
+  // 登録直後（初期パスワードのまま）のアカウントは、本人のパスワードに
+  // 変更するまでアプリ本体に入れない。
+  if (user.user_metadata && user.user_metadata.must_change_password) {
+    forcedPasswordChangeUser = user;
+    showPasswordResetScreen(true);
+    return;
+  }
   sessionUser = user;
   currentProfile = await loadProfile(user);
   document.getElementById('loginScreen').classList.add('hidden');
@@ -398,8 +429,8 @@ function scheduleRefresh() {
 }
 
 function scheduleOptionsRefresh() {
-  clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(async () => {
+  clearTimeout(optionsRefreshTimer);
+  optionsRefreshTimer = setTimeout(async () => {
     await loadOptions();
     renderOptionManager();
     refreshCategorySelects();
@@ -407,8 +438,8 @@ function scheduleOptionsRefresh() {
 }
 
 function schedulePollsRefresh() {
-  clearTimeout(pollRefreshTimer);
-  pollRefreshTimer = setTimeout(async () => {
+  clearTimeout(pollsListRefreshTimer);
+  pollsListRefreshTimer = setTimeout(async () => {
     await loadAvailabilityPolls();
   }, 400);
 }
@@ -705,7 +736,7 @@ function isSameDay(a, b) {
 
 function createEventRowHtml(event) {
   const timeText = [event.startTime, event.endTime].filter(Boolean).join(' - ');
-  const placeHtml = event.placeUrl ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所リンク')}</a>` : escapeHtml(event.place || '');
+  const placeHtml = isSafeHttpUrl(event.placeUrl) ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所リンク')}</a>` : escapeHtml(event.place || '');
   const deadlineText = formatDate(event.answerDeadline);
 
   const metaParts = [`<span>${escapeHtml(formatDate(event.date) || '日付未定')}</span>`];
@@ -861,7 +892,7 @@ function renderSingleMemberMode(events, memberId, answerStatus) {
   const counts = countMemberStatuses(target.map(event => event.answers[0]));
   status.textContent = `人主体：${member ? displayName(member) : ''}の予定を${target.length}件表示中`;
   list.className = '';
-  list.innerHTML = createMemberSummaryHtml(counts) + (target.length ? groupByMonth(target).map(createMonthHtml).join('') : '<section class="empty">該当する予定がありません。</section>');
+  list.innerHTML = createMemberSummaryHtml(counts) + (target.length ? groupByMonth(target).map(createMonthHtml).join('') : '<section class="empty">表示できる予定がありません。</section>');
 }
 
 function renderAllMembersMode(events, answerStatus) {
@@ -1052,7 +1083,7 @@ function renderAnswerPage() {
       <div class="meta-item"><span class="meta-label">分類</span><span>${escapeHtml(event.category)}</span></div>
       <div class="meta-item"><span class="meta-label">日付</span><span>${escapeHtml(formatDate(event.date))}</span></div>
       <div class="meta-item"><span class="meta-label">時間</span><span>${escapeHtml(timeText)}</span></div>
-      <div class="meta-item"><span class="meta-label">場所</span><span>${event.placeUrl ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所')}</a>` : escapeHtml(event.place || '-')}</span></div>
+      <div class="meta-item"><span class="meta-label">場所</span><span>${isSafeHttpUrl(event.placeUrl) ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所')}</a>` : escapeHtml(event.place || '-')}</span></div>
       <div class="meta-item"><span class="meta-label">期限</span><span>${escapeHtml(formatDate(event.answerDeadline) || '-')}</span></div>
       <div class="meta-item meta-item-wide"><span class="meta-label">備考</span><span>${escapeHtml(event.note || '-')}</span></div>
     </div>
@@ -1550,6 +1581,12 @@ async function saveEventForm() {
     return;
   }
 
+  const placeUrlInput = document.getElementById('placeUrl').value.trim();
+  if (placeUrlInput && !isSafeHttpUrl(placeUrlInput)) {
+    showMessage('eventMessage', '場所URLはhttp(s)から始まるURLで入力してください。', false);
+    return;
+  }
+
   const isEdit = Boolean(document.getElementById('eventId').value);
   const payload = {
     id: eventId,
@@ -1991,6 +2028,37 @@ async function renderTopPhotoManager() {
   `).join('');
 }
 
+// スマホのカメラ写真は数MB〜十数MBになりがちで、そのままアップロードすると
+// トップページを開くたびにログイン中の全員がフルサイズをダウンロードすることになる。
+// アップロード前にcanvasで長辺1920pxまで縮小・JPEG再圧縮してから送る
+// （失敗しても元のファイルでアップロードを続行し、機能自体は止めない）。
+async function compressImageFile(file, maxDimension, quality) {
+  if (!file.type || !file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') {
+    return file;
+  }
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    if (scale >= 1 && file.size <= 1.5 * 1024 * 1024) {
+      if (bitmap.close) bitmap.close();
+      return file;
+    }
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    if (bitmap.close) bitmap.close();
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' });
+  } catch {
+    return file;
+  }
+}
+
 async function uploadTopPhotos() {
   if (!isAdmin()) return;
   const input = document.getElementById('topPhotoInput');
@@ -2004,8 +2072,9 @@ async function uploadTopPhotos() {
   const restore = setButtonBusy(button, 'アップロード中...');
   const errors = [];
   for (const file of files) {
-    const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const { error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).upload(safeName, file);
+    const compressed = await compressImageFile(file, 1920, 0.82);
+    const safeName = `${Date.now()}-${compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const { error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).upload(safeName, compressed);
     if (error) errors.push(error.message);
   }
   restore();
@@ -2340,6 +2409,19 @@ function escapeAttr(value) {
   return escapeHtml(value).replaceAll('`', '&#096;');
 }
 
+// href等に埋め込む前のスキーム検証。escapeAttrは文字のエスケープしかしないため、
+// javascript: のようなスキームはエスケープを通り抜けてクリック時に実行されてしまう。
+// http/https以外は無効なリンクとして扱う。
+function isSafeHttpUrl(value) {
+  if (!value) return false;
+  try {
+    const url = new URL(String(value), window.location.href);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 // ==========================================================================
 // 候補日程調整（期間指定・ドラッグ入力の空き時間集計）
 // 特定の1予定への出欠（answers）とは別物。新しい予定を立てる前段階として、
@@ -2635,7 +2717,8 @@ function renderPollView() {
         const key = `${iso}_${start}`;
         if (pollMode === 'input') {
           const selected = mySelectedKeys.has(key);
-          return `<div class="poll-cell ${selected ? 'selected' : ''}" data-date="${escapeAttr(iso)}" data-start="${start}" title="${escapeAttr(minutesToLabel(start))}"></div>`;
+          const label = `${d.getMonth() + 1}/${d.getDate()} ${minutesToLabel(start)}`;
+          return `<div class="poll-cell ${selected ? 'selected' : ''}" data-date="${escapeAttr(iso)}" data-start="${start}" title="${escapeAttr(minutesToLabel(start))}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="${escapeAttr(label)}${selected ? '（選択中）' : ''}"></div>`;
         }
         const count = countMap.get(key) || 0;
         const intensity = count ? Math.min(1, 0.15 + 0.75 * (count / maxCount)) : 0;
@@ -2752,6 +2835,28 @@ function setupPollGridEvents() {
   wrap.addEventListener('touchstart', onPollCellTouchStart, { passive: false });
   wrap.addEventListener('touchmove', onPollCellTouchMove, { passive: false });
   wrap.addEventListener('touchend', onPollCellUp);
+  // ドラッグ操作（マウス/タッチ）の代替として、Tabで移動しEnter/Spaceで
+  // 1マスずつトグルできるようにする（キーボードのみで操作する人向け）。
+  wrap.addEventListener('keydown', onPollCellKeyDown);
+}
+
+function onPollCellKeyDown(domEvent) {
+  if (pollMode !== 'input') return;
+  if (domEvent.key !== 'Enter' && domEvent.key !== ' ') return;
+  const cell = domEvent.target.closest('.poll-cell');
+  if (!cell || !cell.dataset.date) return;
+  domEvent.preventDefault();
+  const key = `${cell.dataset.date}_${cell.dataset.start}`;
+  const nowSelected = cell.classList.contains('selected');
+  pollPendingChanges.set(key, { add: !nowSelected });
+  const focusDate = cell.dataset.date;
+  const focusStart = cell.dataset.start;
+  renderPollView();
+  updatePollPendingIndicator();
+  // 再描画でセルのDOMが作り直されるため、同じマスにフォーカスを戻す
+  // （戻さないとフォーカスが失われ、連続してマスを操作しづらくなる）
+  const nextCell = document.querySelector(`.poll-cell[data-date="${CSS.escape(focusDate)}"][data-start="${CSS.escape(focusStart)}"]`);
+  if (nextCell) nextCell.focus();
 }
 
 function applyPollDragToCell(cell) {

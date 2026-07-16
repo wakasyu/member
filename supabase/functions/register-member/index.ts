@@ -21,17 +21,27 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const DEFAULT_PASSWORD = "password";
 const GMAIL_USER = Deno.env.get("GMAIL_USER") ?? "";
 const GMAIL_APP_PASSWORD = Deno.env.get("GMAIL_APP_PASSWORD") ?? "";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+// 固定パスワード"password"は誰でも知っている値になってしまう
+// （README/画面文言にも書かざるを得ないため）ため、登録の都度ランダムな
+// パスワードを発行する。本人以外に見せてよい値ではないため、返す先は
+// 登録した本人のブラウザ（このリクエストのレスポンス）とメール本文のみ。
+function generatePassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
 // 登録メール送信に失敗しても登録自体は完了させたいので、呼び出し側では
 // awaitするが例外は投げない（内部でcatchする）。
 // GmailのSMTP（アプリパスワード認証）経由で送るので、Resendのような
 // 送信ドメイン未認証時の宛先制限を受けず、本人のメールアドレス宛に届く。
-async function sendWelcomeEmail(to: string, name: string) {
+async function sendWelcomeEmail(to: string, name: string, password: string) {
   if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return;
   const client = new SMTPClient({
     connection: {
@@ -49,7 +59,7 @@ async function sendWelcomeEmail(to: string, name: string) {
       from: GMAIL_USER,
       to,
       subject: "[若衆] 登録が完了しました！",
-      content: `${name}さん\n\n登録が完了しました！これから若衆として一緒に頑張っていきましょう！\n\n下記でログインできます。\nメールアドレス：${to}\nパスワード：password\n\n※ログイン後、パスワードは必ず変更してください。`,
+      content: `${name}さん\n\n登録が完了しました！これから若衆として一緒に頑張っていきましょう！\n\n下記でログインできます。\nメールアドレス：${to}\n初期パスワード：${password}\n\n※このパスワードは他の人に共有しないでください。ログイン直後にパスワード変更画面が表示されるので、必ずご自身のパスワードに変更してください。`,
     });
   } catch (error) {
     console.error("welcome email error", error);
@@ -113,14 +123,34 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "電話番号は「090-1234-5678」のようにハイフン区切りで入力してください。" }, 400);
   }
 
-  const { data: invite } = await supabase
+  const { data: precheck } = await supabase
     .from("member_invites")
-    .select("*")
+    .select("used_at")
     .eq("token", token)
     .maybeSingle();
+  if (!precheck) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
+  if (precheck.used_at) return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
 
-  if (!invite) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
-  if (invite.used_at) return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
+  // トークンを条件付きupdateで先に「使用済み」にすることで排他確保する
+  // （select→後で更新、という順序だと同時に2回POSTされた場合に両方とも
+  // used_atチェックを通過してしまい二重登録が起きうるため）。
+  // 以降のどこかで失敗した場合は、この確保を解除して同じリンクをもう一度
+  // 使えるように戻す。
+  const { data: invite, error: claimError } = await supabase
+    .from("member_invites")
+    .update({ used_at: new Date().toISOString() })
+    .eq("token", token)
+    .is("used_at", null)
+    .select()
+    .single();
+
+  if (claimError || !invite) {
+    return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
+  }
+
+  async function releaseInviteClaim() {
+    await supabase.from("member_invites").update({ used_at: null }).eq("id", invite.id);
+  }
 
   const { data: member, error: memberError } = await supabase
     .from("members")
@@ -136,21 +166,25 @@ Deno.serve(async (req) => {
     .single();
 
   if (memberError || !member) {
+    await releaseInviteClaim();
     const message = (memberError?.message || "").toLowerCase().includes("duplicate")
       ? "同じ名前のメンバーが既に登録されています。管理者に確認してください。"
       : `メンバー登録に失敗しました：${memberError?.message || "unknown error"}`;
     return jsonResponse({ error: message }, 400);
   }
 
+  const generatedPassword = generatePassword();
   const { data: created, error: createError } = await supabase.auth.admin.createUser({
     email,
-    password: DEFAULT_PASSWORD,
+    password: generatedPassword,
     email_confirm: true,
+    user_metadata: { must_change_password: true },
   });
 
   if (createError || !created?.user) {
     // アカウント作成に失敗した場合、作りかけのメンバー行を残さない
     await supabase.from("members").delete().eq("id", member.id);
+    await releaseInviteClaim();
     const message = (createError?.message || "").toLowerCase().includes("already")
       ? "このメールアドレスはすでに登録されています。"
       : `アカウント作成に失敗しました：${createError?.message || "unknown error"}`;
@@ -170,7 +204,7 @@ Deno.serve(async (req) => {
 
   await supabase
     .from("member_invites")
-    .update({ used_at: new Date().toISOString(), created_member_id: member.id })
+    .update({ created_member_id: member.id })
     .eq("id", invite.id);
 
   await supabase.from("logs").insert({
@@ -180,7 +214,10 @@ Deno.serve(async (req) => {
     detail: `email: ${email}`,
   });
 
-  await sendWelcomeEmail(email, name);
+  await sendWelcomeEmail(email, name, generatedPassword);
 
-  return jsonResponse({ ok: true });
+  // パスワードをレスポンスに含めるのは、登録した本人が見ている
+  // このリクエストの結果画面だけ（他人には見えない）。メール未設定の
+  // 環境でもこれで初期パスワードを必ず本人が確認できるようにする。
+  return jsonResponse({ ok: true, password: generatedPassword });
 });

@@ -22,6 +22,7 @@
   --none: #374151;
   --limited-bg: #dbeafe;
   --limited: #1d4ed8;
+  --accent-border: #f3c6c6;
 }
 
 * {
@@ -42,7 +43,7 @@ select,
 textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   color: inherit;
   font: inherit;
   padding: 10px 11px;
@@ -80,7 +81,7 @@ button.primary:hover {
 }
 
 button.secondary {
-  background: #fff;
+  background: var(--surface);
   color: var(--main-2);
   border-color: var(--main-border);
 }
@@ -211,6 +212,29 @@ textarea {
   font-size: 13px;
   color: var(--muted);
   font-weight: 800;
+}
+
+/* ラベル文字は13pxのままでよいが、入力欄まで13pxを継承すると
+   iOS Safariがフォーカス時に自動ズームしてしまう（16px未満が条件のため）。
+   入力欄だけ16px・通常のフォントウェイトに戻す。 */
+.form-stack label input,
+.form-stack label select,
+.form-stack label textarea,
+.grid label input,
+.grid label select,
+.grid label textarea,
+.grid3 label input,
+.grid3 label select,
+.grid3 label textarea,
+.grid4 label input,
+.grid4 label select,
+.grid4 label textarea,
+.wide-field input,
+.wide-field select,
+.wide-field textarea {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text);
 }
 
 .event-target-list {
@@ -511,7 +535,7 @@ textarea {
 }
 
 .message.ok {
-  color: #157347;
+  color: var(--join);
 }
 
 .message.error,
@@ -521,7 +545,7 @@ textarea {
 
 .notice {
   margin-bottom: 12px;
-  border: 1px solid #f3c6c6;
+  border: 1px solid var(--accent-border);
   border-radius: 8px;
   background: var(--accent-bg);
   padding: 10px;
@@ -564,7 +588,7 @@ textarea {
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   margin-bottom: 10px;
 }
 
@@ -693,7 +717,7 @@ textarea {
 .meta-label {
   color: var(--muted);
   font-weight: 900;
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .02em;
 }
@@ -711,7 +735,7 @@ textarea {
 .mini {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .member-chip {
@@ -766,7 +790,7 @@ textarea {
   margin-left: 6px;
   background: var(--none-bg);
   color: var(--none);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -817,14 +841,26 @@ textarea {
 }
 
 .status-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
   border-radius: 999px;
-  padding: 3px 9px;
-  font-size: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
   font-weight: 800;
   cursor: pointer;
   color: var(--muted);
+}
+
+/* 取消（回答を未回答に戻す）はリンク風の見た目のまま、実際のタップ領域だけ広げる */
+[data-clear-status] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 4px;
 }
 
 .status-btn.join.active {
@@ -869,9 +905,19 @@ textarea {
 .inline-extra-fields label {
   display: grid;
   gap: 3px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   font-weight: 800;
+}
+
+/* ラベルは12pxのままでよいが、入力欄は16px未満だとiOS Safariが
+   フォーカス時に自動ズームしてしまうため入力欄だけ引き上げる */
+.inline-extra-fields label input,
+.inline-extra-fields label select,
+.inline-extra-fields label textarea {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text);
 }
 
 .inline-extra-fields button.small {
@@ -949,7 +995,7 @@ textarea {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
 }
 
 table {
@@ -991,7 +1037,7 @@ td.wrap {
   width: 26px;
   padding: 4px 0;
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 700px) {
@@ -1020,7 +1066,7 @@ td.wrap {
     padding: 4px 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--surface);
   }
 
   .table-wrap tr.is-archived {
@@ -1238,7 +1284,7 @@ body.top-active .tab.active {
   padding: 10px 14px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
   font-size: 13px;
   font-weight: 700;
@@ -1304,7 +1350,7 @@ body.top-active .top-hero-stat.clickable:hover {
 }
 
 .top-hero-dots span.active {
-  background: #fff;
+  background: var(--surface);
 }
 
 .completion-overlay {
@@ -1323,7 +1369,7 @@ body.top-active .top-hero-stat.clickable:hover {
 }
 
 .completion-badge {
-  background: #fff;
+  background: var(--surface);
   color: var(--main-2);
   border-radius: 14px;
   padding: 20px 32px;
@@ -1357,7 +1403,7 @@ body.top-active .top-hero-stat.clickable:hover {
 }
 
 .admin-mode-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   color: var(--muted);
   padding-left: 6px;
@@ -1366,7 +1412,7 @@ body.top-active .top-hero-stat.clickable:hover {
 
 .admin-mode-btn {
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
   border-radius: 999px;
   padding: 6px 12px;
   font-size: 12px;
@@ -1477,7 +1523,7 @@ body.top-active .top-hero-stat.clickable:hover {
 
 .poll-mode-button {
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
   color: var(--main-2);
   border-radius: 999px;
   padding: 6px 14px;
@@ -1527,7 +1573,7 @@ body.top-active .top-hero-stat.clickable:hover {
 .poll-row-head {
   position: sticky;
   top: 0;
-  background: #fff;
+  background: var(--surface);
   z-index: 1;
   border-top: none;
   border-bottom: 1px solid var(--border);
@@ -1565,7 +1611,7 @@ body.top-active .top-hero-stat.clickable:hover {
   height: 13px;
   border-bottom: 1px solid var(--surface-2);
   border-right: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
   user-select: none;
   touch-action: none;
@@ -1573,6 +1619,13 @@ body.top-active .top-hero-stat.clickable:hover {
 
 .poll-cell:last-child {
   border-bottom: none;
+}
+
+.poll-cell:focus-visible {
+  outline: 2px solid var(--main);
+  outline-offset: -2px;
+  position: relative;
+  z-index: 1;
 }
 
 .poll-cell.selected {

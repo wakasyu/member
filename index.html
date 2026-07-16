@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="./home-icon.jpg">
   <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#1d4f8f">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.6" integrity="sha384-GyhLKJoRcMXYwIJUTyx0/uSPYliVPdRYYXJm3G6zyMjKShNs8jLM7WaLpk8Vr4W/" crossorigin="anonymous"></script>
   <script src="./config.js"></script>
   <script defer src="./app.js"></script>
 </head>
@@ -47,15 +47,15 @@
         </label>
         <button class="primary" type="submit">スタッフとしてログイン</button>
       </form>
-      <div id="loginMessage" class="message"></div>
+      <div id="loginMessage" class="message" role="status" aria-live="polite"></div>
     </section>
   </div>
 
   <div id="passwordResetScreen" class="login-screen hidden">
     <section class="login-card">
       <div class="brand-mark"><img src="./logo.jpg" alt="若衆の絆" onerror="this.remove()"><span>若衆</span></div>
-      <h1>新しいパスワードを設定</h1>
-      <p>メールのリンクから開いています。新しいパスワードを入力してください。</p>
+      <h1 id="passwordResetHeading">新しいパスワードを設定</h1>
+      <p id="passwordResetIntro">メールのリンクから開いています。新しいパスワードを入力してください。</p>
       <form id="passwordResetForm" class="form-stack">
         <label>
           新しいパスワード
@@ -67,7 +67,7 @@
         </label>
         <button id="submitNewPasswordButton" class="primary" type="submit">パスワードを更新</button>
       </form>
-      <div id="passwordResetMessage" class="message"></div>
+      <div id="passwordResetMessage" class="message" role="status" aria-live="polite"></div>
     </section>
   </div>
 
@@ -76,7 +76,7 @@
       <div class="brand-mark"><img src="./logo.jpg" alt="若衆の絆" onerror="this.remove()"><span>若衆</span></div>
       <h1>メンバー登録</h1>
       <p id="registerIntro" class="muted"></p>
-      <p class="notice">登録すると、入力したメールアドレスとパスワード「<strong>password</strong>」でログインできるようになります。ログイン後は必ずパスワードを変更してください。</p>
+      <p class="notice">登録すると、ログイン用の初期パスワードが発行されます（登録完了時にこの画面とメールに表示されます）。ログイン直後にパスワード変更画面が表示されるので、必ずご自身のパスワードに変更してください。</p>
       <form id="registerForm" class="form-stack">
         <label>
           メールアドレス
@@ -108,7 +108,7 @@
         </label>
         <button id="submitRegisterButton" class="primary" type="submit">登録する</button>
       </form>
-      <div id="registerMessage" class="message"></div>
+      <div id="registerMessage" class="message" role="status" aria-live="polite"></div>
       <button id="registerGoToLoginButton" class="primary hidden" type="button" onclick="goToLoginScreen()">ログイン画面へ</button>
     </section>
   </div>
@@ -131,7 +131,7 @@
       <div class="header-actions">
         <div>
           <button type="button" onclick="manualRefresh()">更新</button>
-          <p id="refreshStatus" class="muted refresh-status hidden"></p>
+          <p id="refreshStatus" class="muted refresh-status hidden" role="status" aria-live="polite"></p>
         </div>
         <button type="button" onclick="signOut()">ログアウト</button>
       </div>
@@ -186,13 +186,14 @@
           </div>
         </details>
       </section>
-      <div id="publicStatus" class="status">読み込み中...</div>
+      <div id="publicStatus" class="status" role="status" aria-live="polite">読み込み中...</div>
       <main id="eventList"></main>
     </section>
 
     <section id="answerView" class="view">
       <section class="panel">
         <h2>日程調整回答</h2>
+        <p class="muted">「予定一覧」タブでも各予定のその場で回答できます。ここは共有された日程調整リンクから開いた場合や、予定を選んで回答したい場合に使います。</p>
         <label class="wide-field">
           予定を選択
           <select id="answerEventSelect"><option value="">予定を選択してください</option></select>
@@ -201,7 +202,7 @@
           代理入力するメンバー（管理者のみ）
           <select id="answerMemberSelect"><option value="">メンバーを選択</option></select>
         </label>
-        <div id="answerStatus" class="status">予定を選択すると回答できます。</div>
+        <div id="answerStatus" class="status" role="status" aria-live="polite">予定を選択すると回答できます。</div>
         <div id="answerEventBox" class="answer-event hidden"></div>
         <div id="answerFormFields" class="hidden">
           <div class="grid">
@@ -244,7 +245,7 @@
             <button id="submitAnswerButton" class="primary" type="button" onclick="submitAnswer()">回答を送信</button>
             <button id="clearAnswerButton" class="danger hidden" type="button" onclick="clearAnswer()">回答を取り消す（未回答に戻す）</button>
           </div>
-          <div id="answerMessage" class="message"></div>
+          <div id="answerMessage" class="message" role="status" aria-live="polite"></div>
         </div>
       </section>
     </section>
@@ -257,7 +258,7 @@
           調整を選択
           <select id="pollSelect" onchange="onPollSelectChange()"><option value="">候補日程調整を選択してください</option></select>
         </label>
-        <div id="pollStatus" class="status">候補日程調整を選択してください。</div>
+        <div id="pollStatus" class="status" role="status" aria-live="polite">候補日程調整を選択してください。</div>
         <div id="pollBox" class="hidden">
           <p id="pollNote" class="muted"></p>
           <label id="pollActingMemberWrap" class="wide-field hidden">
@@ -328,7 +329,7 @@
           <button type="button" onclick="clearEventForm()">入力をクリア</button>
           <button id="cancelEventFormButton" class="hidden" type="button" onclick="cancelEventForm()">キャンセル</button>
         </div>
-        <div id="eventMessage" class="message"></div>
+        <div id="eventMessage" class="message" role="status" aria-live="polite"></div>
       </section>
     </section>
 
@@ -352,7 +353,7 @@
           <div class="panel-head"><h3>新規メンバー登録リンク</h3></div>
           <p class="muted">発行すると、新しく入る人がリンクを開いて名前・連絡先・メールアドレスを自分で入力するだけで、メンバー登録とアカウント作成まで完了できます（事前にここへ何か入力しておく必要はありません）。</p>
           <button type="button" onclick="issueNewMemberInviteLink(this)">登録リンクを発行</button>
-          <div id="newMemberInviteMessage" class="message"></div>
+          <div id="newMemberInviteMessage" class="message" role="status" aria-live="polite"></div>
         </div>
 
         <div class="panel-head"><h3>基本情報</h3></div>
@@ -384,7 +385,7 @@
           <button id="saveMemberButton" class="primary" type="button" onclick="saveMemberForm()">メンバーを保存</button>
           <button type="button" onclick="clearMemberForm()">入力をクリア</button>
         </div>
-        <div id="memberMessage" class="message"></div>
+        <div id="memberMessage" class="message" role="status" aria-live="polite"></div>
       </section>
 
       <section class="panel admin-section active" data-admin-section="eventList">
@@ -423,7 +424,7 @@
           <input id="newReasonCategoryInput" type="text" placeholder="新しい理由カテゴリ名">
           <button type="button" onclick="addOption('reason_category', 'newReasonCategoryInput')">追加</button>
         </div>
-        <div id="optionMessage" class="message"></div>
+        <div id="optionMessage" class="message" role="status" aria-live="polite"></div>
       </section>
 
       <section class="panel admin-section" data-admin-section="photos">
@@ -434,7 +435,7 @@
           <input id="topPhotoInput" type="file" accept="image/*" multiple>
           <button id="uploadTopPhotoButton" type="button" onclick="uploadTopPhotos()">アップロード</button>
         </div>
-        <div id="topPhotoMessage" class="message"></div>
+        <div id="topPhotoMessage" class="message" role="status" aria-live="polite"></div>
       </section>
 
       <section class="panel admin-section" data-admin-section="polls">
@@ -458,7 +459,7 @@
           <button id="savePollButton" class="primary" type="button" onclick="savePollForm()">候補日程調整を保存</button>
           <button type="button" onclick="clearPollForm()">入力をクリア</button>
         </div>
-        <div id="pollFormMessage" class="message"></div>
+        <div id="pollFormMessage" class="message" role="status" aria-live="polite"></div>
         <div class="panel-head"><h3>作成済みの候補日程調整</h3></div>
         <div id="adminPolls"></div>
       </section>
@@ -466,7 +467,7 @@
   </div>
 
   <div id="completionOverlay" class="completion-overlay hidden">
-    <div class="completion-badge"></div>
+    <div class="completion-badge" role="status" aria-live="polite"></div>
   </div>
 
   <div id="adminModeSwitcher" class="admin-mode-switcher hidden">
