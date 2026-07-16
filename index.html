@@ -295,8 +295,8 @@
     </section>
 
     <section id="eventFormView" class="view">
-      <section class="panel">
-        <h2>予定追加・編集</h2>
+      <section id="eventFormPanel" class="panel">
+        <h2 id="eventFormHeading">予定追加・編集</h2>
         <p class="muted">予定を保存すると、その予定専用の日程調整リンクが自動発行されます。</p>
         <input id="eventId" type="hidden">
         <input id="eventToken" type="hidden">
@@ -326,6 +326,7 @@
         <div class="button-row">
           <button id="saveEventButton" class="primary" type="button" onclick="saveEventForm()">予定を保存</button>
           <button type="button" onclick="clearEventForm()">入力をクリア</button>
+          <button id="cancelEventFormButton" class="hidden" type="button" onclick="cancelEventForm()">キャンセル</button>
         </div>
         <div id="eventMessage" class="message"></div>
       </section>
@@ -388,7 +389,11 @@
 
       <section class="panel admin-section active" data-admin-section="eventList">
         <h2>予定一覧・日程調整リンク</h2>
-        <label class="inline-check"><input id="showArchivedEvents" type="checkbox" onchange="renderAdminEvents()"> 削除済みも表示する</label>
+        <div class="button-row">
+          <label class="inline-check"><input id="showArchivedEvents" type="checkbox" onchange="renderAdminEvents()"> 削除済みも表示する</label>
+          <button type="button" onclick="startAddEvent()">予定を追加</button>
+        </div>
+        <div id="adminEventFormSlot" class="hidden"></div>
         <div id="adminEvents"></div>
       </section>
 

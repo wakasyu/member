@@ -279,7 +279,7 @@ async function enterApp(user) {
   document.getElementById('userMeta').textContent = `${displayLabel} / ${roleLabel}`;
   renderAdminModeSwitcher();
   document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
-  document.getElementById('eventFormTabButton').classList.toggle('hidden', !(canAccessAdminPanel() || isStaff()));
+  document.getElementById('eventFormTabButton').classList.toggle('hidden', !isStaff());
   ['top', 'answer', 'poll'].forEach(name => {
     const tabButton = document.querySelector(`.tab[data-tab="${name}"]`);
     if (tabButton) tabButton.classList.toggle('hidden', isStaff());
@@ -359,12 +359,11 @@ function renderAdminModeSwitcher() {
 
 function applyAdminViewModeVisibility() {
   document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
-  document.getElementById('eventFormTabButton').classList.toggle('hidden', !(canAccessAdminPanel() || isStaff()));
+  document.getElementById('eventFormTabButton').classList.toggle('hidden', !isStaff());
   setupPollActingMemberSelect();
   const activeView = document.querySelector('.view.active');
   const activeName = activeView ? activeView.id.replace('View', '') : '';
   if (!canAccessAdminPanel() && activeName === 'admin') switchView('public');
-  if (!(canAccessAdminPanel() || isStaff()) && activeName === 'eventForm') switchView('public');
 }
 
 async function signOut() {
@@ -1222,6 +1221,7 @@ function updatePendingVisibility() {
 }
 
 function setupAdminForms() {
+  mountEventFormPanel();
   fillSelect('eventCategory', categoryOptions.map(option => option.label), '分類を選択');
   document.getElementById('creator').value = getDefaultCreatorName();
 
@@ -1599,15 +1599,66 @@ async function saveEventForm() {
 
   restore();
   await appendLog(isEdit ? '予定編集' : '予定追加', eventId, eventName, '', '', '', '', '');
-  showMessage('eventMessage', `予定を保存しました。日程調整リンク：${createScheduleUrl(token)}`, true);
-  clearEventForm();
+  if (isStaff()) {
+    showMessage('eventMessage', `予定を保存しました。日程調整リンク：${createScheduleUrl(token)}`, true);
+    clearEventForm();
+  } else {
+    flashCompletionOverlay(isEdit ? '予定を更新しました' : '予定を追加しました');
+    setTimeout(() => {
+      clearEventForm();
+      closeEventForm();
+    }, 900);
+  }
   await refreshAll();
+}
+
+// 管理者ログイン時は「管理 > 予定一覧」内にこのフォームを移動し、その場で
+// 展開する形にする（スタッフはこれまで通り上部タブの専用画面を使う）。
+// 役割はセッション中変わらないため、この振り分けは起動時に1回だけ行えばよい。
+function mountEventFormPanel() {
+  const panel = document.getElementById('eventFormPanel');
+  const slot = document.getElementById('adminEventFormSlot');
+  if (!panel || !slot) return;
+  if (isAdmin()) {
+    slot.appendChild(panel);
+    document.getElementById('cancelEventFormButton').classList.remove('hidden');
+  }
+}
+
+function openEventForm(mode) {
+  document.getElementById('eventFormHeading').textContent = mode === 'edit' ? '予定を編集' : '予定を追加';
+  if (isStaff()) {
+    switchView('eventForm');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  if (!isAdmin()) return;
+  switchView('admin');
+  switchAdminTab('eventList');
+  const slot = document.getElementById('adminEventFormSlot');
+  slot.classList.remove('hidden');
+  slot.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeEventForm() {
+  const slot = document.getElementById('adminEventFormSlot');
+  if (slot) slot.classList.add('hidden');
+}
+
+function cancelEventForm() {
+  clearEventForm();
+  closeEventForm();
+}
+
+function startAddEvent() {
+  clearEventForm();
+  openEventForm('add');
 }
 
 function editEvent(eventId) {
   const event = publicData.events.find(item => item.eventId === eventId);
   if (!event) return;
-  switchView('eventForm');
+  openEventForm('edit');
   document.getElementById('eventId').value = event.eventId || '';
   document.getElementById('eventToken').value = event.answerToken || '';
   document.getElementById('eventName').value = event.eventName || '';
@@ -1628,7 +1679,6 @@ function editEvent(eventId) {
   document.getElementById('answerDeadline').value = event.answerDeadline || '';
   document.getElementById('eventNote').value = event.note || '';
   renderEventTargetMemberList();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function deleteEvent(eventId) {
@@ -1855,7 +1905,7 @@ async function appendLog(action, eventId, eventName, memberId, memberName, oldSt
 
 function switchView(name) {
   if (name === 'admin' && !canAccessAdminPanel()) return;
-  if (name === 'eventForm' && !canAccessAdminPanel() && !isStaff()) return;
+  if (name === 'eventForm' && !isStaff()) return;
   if (isStaff() && ['top', 'answer', 'poll'].includes(name)) return;
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
   document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
