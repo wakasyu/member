@@ -26,7 +26,8 @@
 | `supabase-schema.sql` | テーブル・RLS・Storageバケット・Webhook基盤。**何度実行しても安全**（if not exists / if existsで書いてある） |
 | `supabase/functions/notify-answer/index.ts` | 出欠が全員分揃った時の管理者向け通知メール（Resend） |
 | `supabase/functions/register-member/index.ts` | メンバー自己登録（招待リンク）用の公開エンドポイント |
-| `logo.jpg` | 実際のクラブロゴ（Instagramアイコン用の正方形画像、丸枠で表示） |
+| `logo.jpg` | 実際のクラブロゴ（Instagramアイコン用の正方形画像、丸枠で表示）。ブラウザのタブアイコン（favicon）とログイン画面・ヘッダーのロゴに使用 |
+| `home-icon.jpg` | スマホでホーム画面に追加した時だけに使う専用アイコン（`apple-touch-icon`と`manifest.json`のicon）。「政やの絆 若衆」のバナーロゴ |
 | `README.md` | セットアップ手順・機能一覧（利用者向け） |
 
 ## ロール（3種類）
