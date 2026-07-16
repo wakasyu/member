@@ -324,6 +324,12 @@ create table if not exists public.availability_polls (
   updated_at timestamptz not null default now()
 );
 
+-- 日程アンケートごとの共有リンクに使うトークン。URLでは ?poll=... として使う
+alter table public.availability_polls add column if not exists answer_token text unique;
+update public.availability_polls set answer_token = encode(gen_random_bytes(18), 'hex') where answer_token is null;
+alter table public.availability_polls alter column answer_token set not null;
+alter table public.availability_polls alter column answer_token set default encode(gen_random_bytes(18), 'hex');
+
 -- 1メンバー・1日・1時間帯（slot_start_minutesはその日の0:00からの分）ごとに
 -- 「空いている」という申告を1行で表す。ドラッグ選択の追加/解除はinsert/deleteで行う。
 create table if not exists public.availability_slots (
@@ -336,7 +342,7 @@ create table if not exists public.availability_slots (
   unique (poll_id, member_id, slot_date, slot_start_minutes)
 );
 
--- 候補日程調整に対する、メンバー1人につき1件の自由記述の備考
+-- 日程アンケートに対する、メンバー1人につき1件の自由記述の備考
 -- （「後半は難しいかも」等、時間帯の申告だけでは伝えづらい補足用）
 create table if not exists public.availability_notes (
   id uuid primary key default gen_random_uuid(),

@@ -393,6 +393,19 @@ textarea {
   border-radius: 10px;
 }
 
+/* 予定名・場所などに長い英数字の連続（改行できる区切りが無い文字列）が
+   入ると、コンテナ幅を無視して横にはみ出し、画面全体が横スクロール
+   できてしまっていた。折り返させて幅に収める */
+.answer-event {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.answer-event h3 {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
 .tabs,
 .subtabs,
 .toolbar {
@@ -587,6 +600,7 @@ textarea {
   gap: 6px;
   padding: 12px 16px;
   border: 1px solid var(--border);
+  border-left-width: 6px;
   border-radius: 10px;
   background: var(--surface);
   margin-bottom: 10px;
@@ -596,12 +610,34 @@ textarea {
   background: var(--surface-2);
 }
 
+/* 分類ごとに左帯の色を変え、一覧をスクロールしたときに種類が
+   ぱっと見分けられるようにする（DBに色は持たせず文字列から決定的に算出） */
+.event-row.cat-color-1 { border-left-color: #1d4f8f; }
+.event-row.cat-color-1 .cat { background: #e8f0fc; color: #123b6e; }
+.event-row.cat-color-2 { border-left-color: #d85a30; }
+.event-row.cat-color-2 .cat { background: #faece7; color: #993c1d; }
+.event-row.cat-color-3 { border-left-color: #0f6e56; }
+.event-row.cat-color-3 .cat { background: #e1f5ee; color: #085041; }
+.event-row.cat-color-4 { border-left-color: #d4537e; }
+.event-row.cat-color-4 .cat { background: #fbeaf0; color: #993556; }
+.event-row.cat-color-5 { border-left-color: #854f0b; }
+.event-row.cat-color-5 .cat { background: #faeeda; color: #633806; }
+.event-row.cat-color-6 { border-left-color: #534ab7; }
+.event-row.cat-color-6 .cat { background: #eeedfe; color: #3c3489; }
+
 .event-row-top {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 6px 16px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.event-row-top:focus-visible {
+  outline: 2px solid var(--main);
+  outline-offset: 2px;
 }
 
 .event-row-summary {
@@ -614,15 +650,22 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
+  gap: 4px;
 }
 
-.event-row-actions .share-actions {
+.event-row-body .share-actions {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 8px;
+  margin-bottom: 8px;
+}
+
+.event-toggle-hint {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--main-2);
+  white-space: nowrap;
 }
 
 .event-row-head {
@@ -654,7 +697,9 @@ textarea {
 }
 
 .event-row-body {
-  margin-top: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 .counts-inline {
@@ -690,7 +735,7 @@ textarea {
 }
 
 .event-title {
-  font-size: 15.5px;
+  font-size: 17px;
   font-weight: 900;
   line-height: 1.4;
   word-break: break-word;
@@ -708,6 +753,7 @@ textarea {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .meta-item-wide {
@@ -743,6 +789,24 @@ textarea {
   padding: 5px 7px;
 }
 
+/* 「回答完了」を押すまでDBに保存されていないことが分かるようにする */
+.member-chip.is-unsaved {
+  border-style: dashed;
+  border-color: var(--main-border);
+  background: var(--main-light);
+}
+
+/* 管理者が自分以外のメンバーの回答を代理変更しようとしている項目に出す注意書き */
+.proxy-edit-warning {
+  margin-bottom: 5px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .member-head {
   display: flex;
   justify-content: space-between;
@@ -769,6 +833,26 @@ textarea {
   cursor: pointer;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
+}
+
+.member-name-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.member-name-toggle .member-name {
+  min-width: 0;
+}
+
+.details-toggle-hint {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--main-2);
+  white-space: nowrap;
 }
 
 .visually-hidden {
@@ -926,8 +1010,10 @@ textarea {
   padding: 4px 12px;
 }
 
+/* 「要回答」バッジと自動展開ですでに目立つため、左帯の色は分類色のまま
+   （幅・色をここで上書きすると分類の色分けが分からなくなってしまう） */
 .event-row.needs-answer {
-  border-left: 3px solid var(--pen);
+  box-shadow: inset 0 0 0 1px var(--pen);
 }
 
 .badge.none {
@@ -1443,6 +1529,57 @@ body.top-active .top-hero-stat.clickable:hover {
   }
 }
 
+/* 予定一覧でその場回答した内容をまとめて確定する右下固定バー。
+   管理者は同じ右下にいる表示モード切替（.admin-mode-switcher）の
+   真上に来るよう底からの距離をずらす */
+.inline-answer-bar {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 850;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .92);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(18, 59, 110, .18);
+  backdrop-filter: blur(6px);
+}
+
+.inline-answer-bar.above-mode-switcher {
+  bottom: 76px;
+}
+
+.inline-answer-pending-indicator {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.inline-answer-bar-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .inline-answer-bar {
+    left: 10px;
+    right: 10px;
+    align-items: stretch;
+  }
+
+  .inline-answer-bar-buttons {
+    flex-direction: column;
+  }
+
+  .inline-answer-bar-buttons button {
+    width: 100%;
+  }
+}
+
 @media (max-width: 920px) {
   .shell {
     padding: 12px;
@@ -1506,7 +1643,7 @@ body.top-active .top-hero-stat.clickable:hover {
   }
 }
 
-/* 候補日程調整（期間指定の空き時間集計） */
+/* 日程アンケート（期間指定の空き時間集計） */
 .poll-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1635,6 +1772,16 @@ body.top-active .top-hero-stat.clickable:hover {
 .poll-cell.result {
   cursor: default;
   background: rgba(29, 79, 143, var(--intensity, 0));
+  /* 結果表示はドラッグ選択が無いので、指でのスクロール（縦横とも）を邪魔しない */
+  touch-action: pan-x pan-y;
+}
+
+/* 「入力開始」を押すまでは操作不可（誤スワイプでの誤選択を防ぐ）。
+   ドラッグ選択が無効な間はスクロールを妨げないようにする */
+.poll-cell.locked {
+  cursor: default;
+  background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 4px, var(--surface) 4px, var(--surface) 8px);
+  touch-action: pan-x pan-y;
 }
 
 .poll-suggestions {

@@ -6,6 +6,7 @@ let currentProfile = null;
 let publicData = { events: [], members: [], eventTargetOverrides: [] };
 let answerData = null;
 let currentAnswerToken = '';
+let currentPollToken = '';
 let categoryOptions = [];
 let reasonCategoryOptions = [];
 let realtimeChannel = null;
@@ -17,6 +18,21 @@ const messageTimers = new Map();
 const STAFF_LOGIN_EMAIL = 'staff@wakasyu.local';
 let staffDisplayName = sessionStorage.getItem('staffDisplayName') || '';
 
+// 不参加/未定/時間限定を選んだ直後に詳細欄を開いたままにしておくための一時状態
+// （`{answerToken}_{memberId}` の組み合わせ）。名前クリックでの手動開閉とも同期する
+let expandedChipKeys = new Set();
+
+// 予定カードの折りたたみ状態の手動上書き（`answerToken` -> boolean）。
+// 未設定なら「要回答なら自動展開・それ以外は折りたたみ」がデフォルト
+let expandedEventOverrides = new Map();
+
+// 予定一覧でのその場の出欠回答を即時保存せず「回答完了」ボタンでまとめて
+// 保存できるようにするための保留状態。（`{answerToken}_{memberId}` -> 変更内容）
+let inlineAnswerPendingChanges = new Map();
+// buildPublicEventをDB再取得なしでローカル再構築するための生データキャッシュ
+let lastRawEvents = [];
+let lastRawAnswers = [];
+
 let eventFormTargetMemberIds = null;
 let eventFormTargetTouched = false;
 let eventFormPreAnswers = {};
@@ -26,6 +42,7 @@ let currentPoll = null;
 let currentPollSlots = [];
 let currentPollNotes = [];
 let pollMode = 'input';
+let pollInputArmed = false;
 let pollWeekOffset = 0;
 let pollDrag = null;
 let pollViewInitialized = false;
@@ -34,6 +51,14 @@ let pollActingMemberId = '';
 let pollPendingChanges = new Map();
 
 document.addEventListener('DOMContentLoaded', initializeApp);
+
+// 「回答完了」を押す前にページを離れて未保存の回答を失うことがないよう警告する
+window.addEventListener('beforeunload', (domEvent) => {
+  if (inlineAnswerPendingChanges.size) {
+    domEvent.preventDefault();
+    domEvent.returnValue = '';
+  }
+});
 
 // logo.jpgはInstagramアイコン用の正方形画像（白背景に丸いデザイン）のため、
 // ブラウザのタブアイコン（favicon）は画像そのままだと四角く白い余白が出てしまう。
@@ -89,6 +114,7 @@ async function initializeApp() {
 
   const params = new URLSearchParams(window.location.search);
   currentAnswerToken = params.get('schedule') || params.get('answer') || '';
+  currentPollToken = params.get('poll') || '';
 
   if (params.get('register')) {
     await showRegisterScreen(params.get('register'));
@@ -305,9 +331,7 @@ async function enterApp(user) {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('passwordResetScreen').classList.add('hidden');
   document.getElementById('appShell').classList.remove('hidden');
-  const roleLabel = isAdmin() ? '管理者' : isStaff() ? '政やスタッフ' : 'メンバー';
-  const displayLabel = isStaff() ? (staffDisplayName || '政やスタッフ') : (currentProfile.display_name || user.email);
-  document.getElementById('userMeta').textContent = `${displayLabel} / ${roleLabel}`;
+  updateUserMetaLabel();
   renderAdminModeSwitcher();
   document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
   document.getElementById('eventFormTabButton').classList.toggle('hidden', !isStaff());
@@ -327,6 +351,9 @@ async function enterApp(user) {
   if (currentAnswerToken) {
     switchView('answer');
     await loadAnswerData(currentAnswerToken);
+  } else if (currentPollToken) {
+    await openPollByToken(currentPollToken);
+    currentPollToken = '';
   }
 }
 
@@ -388,9 +415,19 @@ function renderAdminModeSwitcher() {
   });
 }
 
+function updateUserMetaLabel() {
+  const el = document.getElementById('userMeta');
+  if (!el || !currentProfile) return;
+  // 表示モードが「メンバー」の間は本当のメンバーと同じ見え方にする
+  const roleLabel = isStaff() ? '政やスタッフ' : (isAdmin() && adminViewMode === 'member') ? 'メンバー' : isAdmin() ? '管理者' : 'メンバー';
+  const displayLabel = isStaff() ? (staffDisplayName || '政やスタッフ') : (currentProfile.display_name || (sessionUser && sessionUser.email) || '');
+  el.textContent = `${displayLabel} / ${roleLabel}`;
+}
+
 function applyAdminViewModeVisibility() {
   document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
   document.getElementById('eventFormTabButton').classList.toggle('hidden', !isStaff());
+  updateUserMetaLabel();
   setupPollActingMemberSelect();
   const activeView = document.querySelector('.view.active');
   const activeName = activeView ? activeView.id.replace('View', '') : '';
@@ -556,8 +593,20 @@ async function loadPublicData() {
 
   publicData.members = (members || []).map(normalizeMember);
   publicData.eventTargetOverrides = targets || [];
-  publicData.events = (events || []).map(event => buildPublicEvent(normalizeEvent(event), publicData.members, answers || [], publicData.eventTargetOverrides));
+  lastRawEvents = events || [];
+  lastRawAnswers = answers || [];
+  publicData.events = lastRawEvents.map(event => buildPublicEvent(normalizeEvent(event), publicData.members, lastRawAnswers, publicData.eventTargetOverrides));
   setupPublicFilters();
+  renderPublic();
+  populateAnswerEventSelect();
+  renderTopHighlights();
+  if (isAdmin()) renderAdmin();
+}
+
+// 保留中の出欠回答（inlineAnswerPendingChanges）をDBへ問い合わせ直さずに
+// 画面へ反映するためのローカル再構築（サーバーへは何も送信しない）
+function rebuildPublicEvents() {
+  publicData.events = lastRawEvents.map(event => buildPublicEvent(normalizeEvent(event), publicData.members, lastRawAnswers, publicData.eventTargetOverrides));
   renderPublic();
   populateAnswerEventSelect();
   renderTopHighlights();
@@ -595,7 +644,7 @@ function buildPublicEvent(event, members, answers, targetOverrides) {
   const targetMembers = getEligibleMembers(event, members, targetOverrides);
   const eventAnswers = targetMembers.map(member => {
     const answer = answers.find(item => item.event_id === event.eventId && item.member_id === member.memberId);
-    return {
+    const base = {
       memberId: member.memberId,
       name: member.name,
       shortName: member.shortName,
@@ -610,6 +659,12 @@ function buildPublicEvent(event, members, answers, targetOverrides) {
       limitedStartTime: answer ? normalizeTime(answer.limited_start_time) : '',
       limitedEndTime: answer ? normalizeTime(answer.limited_end_time) : ''
     };
+    // 予定一覧でその場回答した内容は、まだDBに送信していなくても
+    // 画面上は反映済みに見せる（「回答完了」を押すまでは未保存）
+    const pending = inlineAnswerPendingChanges.get(`${event.answerToken}_${member.memberId}`);
+    return pending
+      ? { ...base, status: pending.status, pendingUntil: pending.pendingUntil, comment: pending.comment, reasonCategory: pending.reasonCategory, reasonDetail: pending.reasonDetail, limitedStartTime: pending.limitedStartTime, limitedEndTime: pending.limitedEndTime, isPending: true }
+      : base;
   });
   const counts = STATUS_LIST.reduce((acc, status) => {
     acc[status] = eventAnswers.filter(answer => answer.status === status).length;
@@ -734,12 +789,22 @@ function isSameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+// 分類名から常に同じ色を割り当てる（DBに色を持たせず、文字列から決定的に算出する）
+const CATEGORY_COLOR_COUNT = 6;
+function categoryColorIndex(category) {
+  const str = String(category || '');
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  return (hash % CATEGORY_COLOR_COUNT) + 1;
+}
+
 function createEventRowHtml(event) {
   const timeText = [event.startTime, event.endTime].filter(Boolean).join(' - ');
   const placeHtml = isSafeHttpUrl(event.placeUrl) ? `<a href="${escapeAttr(event.placeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.place || '場所リンク')}</a>` : escapeHtml(event.place || '');
   const deadlineText = formatDate(event.answerDeadline);
 
-  const metaParts = [`<span>${escapeHtml(formatDate(event.date) || '日付未定')}</span>`];
+  // 日付は日ごとの見出し（day-heading）ですでに表示されているのでここでは繰り返さない
+  const metaParts = [];
   if (timeText) metaParts.push(`<span>${escapeHtml(timeText)}</span>`);
   if (event.place || event.placeUrl) metaParts.push(`<span>${placeHtml}</span>`);
   if (deadlineText) metaParts.push(`<span>期限 ${escapeHtml(deadlineText)}</span>`);
@@ -756,28 +821,32 @@ function createEventRowHtml(event) {
   const countsHtml = STATUS_LIST.map(status => `<span class="badge ${statusClass(status)}">${escapeHtml(status)} ${Number(event.counts && event.counts[status] || 0)}</span>`).join('');
 
   const needsMyAnswer = myMemberId && !canProxyOthers() && findAnswerForMember(event, myMemberId) && findAnswerForMember(event, myMemberId).status === '未回答';
+  const manualExpand = expandedEventOverrides.get(event.answerToken);
+  const isExpanded = manualExpand !== undefined ? manualExpand : needsMyAnswer;
+  const catIdx = categoryColorIndex(event.category);
 
   return `
-    <article class="event-row ${needsMyAnswer ? 'needs-answer' : ''}">
-      <div class="event-row-top">
+    <article class="event-row cat-color-${catIdx} ${needsMyAnswer ? 'needs-answer' : ''} ${isExpanded ? 'is-expanded' : ''}">
+      <div class="event-row-top" data-toggle-event-details="${escapeAttr(event.answerToken)}" role="button" tabindex="0" aria-expanded="${isExpanded}">
         <div class="event-row-summary">
           <div class="event-row-head">
             <span class="cat">${escapeHtml(event.category || 'その他')}</span>
             <span class="event-title">${escapeHtml(event.eventName)}</span>
             ${needsMyAnswer ? '<span class="badge pending">要回答</span>' : ''}
           </div>
-          <div class="event-meta-line">${metaParts.join('')}</div>
-          ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
+          ${metaParts.length ? `<div class="event-meta-line">${metaParts.join('')}</div>` : ''}
         </div>
         <div class="event-row-actions">
           <div class="counts-inline">${countsHtml}</div>
-          <div class="share-actions">
-            ${canAccessAdminPanel() ? `<button type="button" data-edit-event-inline="${escapeAttr(event.eventId)}">編集</button>` : ''}
-            <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
-          </div>
+          <span class="event-toggle-hint" aria-hidden="true">${isExpanded ? '折りたたむ ▾' : 'タップで詳細 ▸'}</span>
         </div>
       </div>
-      <div class="event-row-body">
+      <div class="event-row-body ${isExpanded ? '' : 'hidden'}">
+        ${event.note ? `<div class="event-note">備考：${escapeHtml(event.note)}</div>` : ''}
+        <div class="share-actions">
+          ${canAccessAdminPanel() ? `<button type="button" data-edit-event-inline="${escapeAttr(event.eventId)}">編集</button>` : ''}
+          <button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button>
+        </div>
         <div class="members">${answerHtml || '<div class="muted">回答対象メンバーがいません。</div>'}</div>
       </div>
     </article>
@@ -807,11 +876,14 @@ function createStaticAnswerChipHtml(answer) {
 
 function createInlineAnswerChipHtml(event, answer) {
   const status = answer.status;
+  const myMemberId = currentProfile ? currentProfile.member_id : null;
+  const isProxyEdit = Boolean(answer.isPending) && canProxyOthers() && answer.memberId !== myMemberId;
   const reasonOptions = reasonCategoryOptions.map(option =>
     `<option value="${escapeAttr(option.label)}" ${answer.reasonCategory === option.label ? 'selected' : ''}>${escapeHtml(option.label)}</option>`
   ).join('');
   const hasDetail = Boolean(answer.pendingUntil || answer.reasonCategory || answer.reasonDetail || answer.comment || answer.limitedStartTime || answer.limitedEndTime);
-  const openAttr = hasDetail ? ' open' : '';
+  const forcedOpen = expandedChipKeys.has(`${event.answerToken}_${answer.memberId}`);
+  const openAttr = (hasDetail || forcedOpen) ? ' open' : '';
 
   let extraHtml = '';
   if (status === '未定') {
@@ -848,13 +920,18 @@ function createInlineAnswerChipHtml(event, answer) {
   }
 
   const nameHtml = extraHtml
-    ? `<span class="member-name has-details" data-toggle-details title="クリックで詳細を開閉">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>`
+    ? `<span class="member-name-toggle" data-toggle-details title="クリックで詳細を開閉" aria-expanded="${hasDetail || forcedOpen}">
+        <span class="member-name has-details">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>
+        <span class="details-toggle-hint" aria-hidden="true">詳細 ${(hasDetail || forcedOpen) ? '▾' : '▸'}</span>
+      </span>`
     : `<span class="member-name">${escapeHtml(displayName(answer))}${memberTagHtml(answer)}</span>`;
 
   return `
-    <div class="member-chip inline-answer" data-event-token="${escapeAttr(event.answerToken)}" data-member-id="${escapeAttr(answer.memberId)}">
+    <div class="member-chip inline-answer ${answer.isPending ? 'is-unsaved' : ''}" data-event-token="${escapeAttr(event.answerToken)}" data-member-id="${escapeAttr(answer.memberId)}">
+      ${isProxyEdit ? '<div class="proxy-edit-warning">自分ではないメンバーの日程を変更しようとしています</div>' : ''}
       <div class="member-head-row1">
         ${nameHtml}
+        ${answer.isPending ? '<span class="tag-muted" title="「回答完了」を押すまで保存されません">未保存</span>' : ''}
         ${status !== '未回答' ? '<button type="button" class="link-button small" data-clear-status>取消</button>' : ''}
       </div>
       <div class="inline-status-buttons">
@@ -871,7 +948,11 @@ function createInlineAnswerChipHtml(event, answer) {
 function toggleInlineDetails(nameEl) {
   const chip = nameEl.closest('.member-chip');
   const details = chip ? chip.querySelector('details.inline-extra-fields') : null;
-  if (details) details.open = !details.open;
+  if (!details) return;
+  details.open = !details.open;
+  const key = `${chip.dataset.eventToken}_${chip.dataset.memberId}`;
+  if (details.open) expandedChipKeys.add(key);
+  else expandedChipKeys.delete(key);
 }
 
 function renderMemberMode(events, memberId, answerStatus) {
@@ -1043,7 +1124,7 @@ function populateAnswerEventSelect() {
   const memberId = currentProfile ? currentProfile.member_id : null;
   const events = publicData.events
     .filter(event => event.publicState !== '削除')
-    .filter(event => isAdmin() || !memberId || (event.answers || []).some(answer => answer.memberId === memberId))
+    .filter(event => canProxyOthers() || !memberId || (event.answers || []).some(answer => answer.memberId === memberId))
     .sort(compareEvents);
   fillSelect('answerEventSelect', events.map(event => ({ value: event.answerToken, label: `[${event.category || 'その他'}] ${formatDate(event.date)} ${event.eventName}` })), '予定を選択してください');
   if (answerData && answerData.event) select.value = answerData.event.answerToken;
@@ -1104,7 +1185,7 @@ function renderAnswerPage() {
 
   if (!memberId) {
     fieldsBox.classList.add('hidden');
-    document.getElementById('answerStatus').textContent = isAdmin()
+    document.getElementById('answerStatus').textContent = canProxyOthers()
       ? 'この予定に対象メンバーがいません。'
       : 'あなたのアカウントはメンバーに紐付けられていません。管理者に連絡してください。';
     return;
@@ -1150,7 +1231,7 @@ function updateClearAnswerVisibility(answer, locked) {
 }
 
 function proxyLogSuffix(memberId) {
-  const actingForSelf = !isAdmin() || memberId === (currentProfile && currentProfile.member_id);
+  const actingForSelf = !canProxyOthers() || memberId === (currentProfile && currentProfile.member_id);
   return actingForSelf ? '' : '（管理者代理入力）';
 }
 
@@ -1161,7 +1242,7 @@ async function submitAnswer() {
   }
   const memberId = getEffectiveMemberId();
   if (!memberId) {
-    showMessage('answerMessage', isAdmin() ? '対象メンバーを選択してください。' : 'あなたのアカウントはメンバーに紐付けられていません。', false);
+    showMessage('answerMessage', canProxyOthers() ? '対象メンバーを選択してください。' : 'あなたのアカウントはメンバーに紐付けられていません。', false);
     return;
   }
   if (isAnswerLocked(answerData.event)) {
@@ -1204,7 +1285,7 @@ async function submitAnswer() {
 
   const member = publicData.members.find(item => item.memberId === payload.member_id);
   const detail = [payload.comment || payload.reason_detail, proxyLogSuffix(memberId)].filter(Boolean).join(' ');
-  await appendLog('日程調整回答', answerData.event.eventId, answerData.event.eventName, payload.member_id, member ? member.name : '', previous ? previous.status : '未回答', payload.status, detail);
+  await appendLog('出欠回答', answerData.event.eventId, answerData.event.eventName, payload.member_id, member ? member.name : '', previous ? previous.status : '未回答', payload.status, detail);
   showMessage('answerMessage', '回答を反映しました。', true);
   flashCompletionOverlay('回答を送信しました');
   await refreshAll();
@@ -1271,6 +1352,13 @@ function setupAdminTables() {
   document.getElementById('adminEvents').addEventListener('click', handleAdminEventsClick);
   document.getElementById('adminMembers').addEventListener('click', handleAdminMembersClick);
   document.getElementById('eventList').addEventListener('click', handlePublicListClick);
+  document.getElementById('eventList').addEventListener('keydown', (domEvent) => {
+    if (domEvent.key !== 'Enter' && domEvent.key !== ' ') return;
+    const eventToggle = domEvent.target.closest('[data-toggle-event-details]');
+    if (!eventToggle) return;
+    domEvent.preventDefault();
+    toggleEventDetails(eventToggle.dataset.toggleEventDetails);
+  });
   document.getElementById('eventCategoryOptions').addEventListener('click', handleOptionRemoveClick);
   document.getElementById('reasonCategoryOptions').addEventListener('click', handleOptionRemoveClick);
   document.getElementById('topPhotoList').addEventListener('click', handleTopPhotoClick);
@@ -1302,9 +1390,21 @@ function handleAdminMembersClick(domEvent) {
   else if (downButton) moveMember(downButton.dataset.moveMemberDown, 'down');
 }
 
+function toggleEventDetails(answerToken) {
+  const event = publicData.events.find(item => item.answerToken === answerToken);
+  if (!event) return;
+  const myMemberId = currentProfile ? currentProfile.member_id : null;
+  const needsMyAnswer = myMemberId && !canProxyOthers() && findAnswerForMember(event, myMemberId) && findAnswerForMember(event, myMemberId).status === '未回答';
+  const manualExpand = expandedEventOverrides.get(answerToken);
+  const currentlyExpanded = manualExpand !== undefined ? manualExpand : needsMyAnswer;
+  expandedEventOverrides.set(answerToken, !currentlyExpanded);
+  renderPublic();
+}
+
 function handlePublicListClick(domEvent) {
   const copyButton = domEvent.target.closest('[data-copy-share]');
   const editButton = domEvent.target.closest('[data-edit-event-inline]');
+  const eventToggle = domEvent.target.closest('[data-toggle-event-details]');
   const nameToggle = domEvent.target.closest('[data-toggle-details]');
   const statusButton = domEvent.target.closest('[data-set-status]');
   const clearButton = domEvent.target.closest('[data-clear-status]');
@@ -1317,6 +1417,10 @@ function handlePublicListClick(domEvent) {
     editEvent(editButton.dataset.editEventInline);
     return;
   }
+  if (eventToggle) {
+    toggleEventDetails(eventToggle.dataset.toggleEventDetails);
+    return;
+  }
   if (nameToggle) {
     toggleInlineDetails(nameToggle);
     return;
@@ -1325,11 +1429,31 @@ function handlePublicListClick(domEvent) {
   if (!chip) return;
   const eventToken = chip.dataset.eventToken;
   const memberId = chip.dataset.memberId;
+  const event = publicData.events.find(item => item.answerToken === eventToken);
+  if (!event) return;
   if (statusButton) {
-    submitInlineAnswer(eventToken, memberId, statusButton.dataset.setStatus);
+    const chosenStatus = statusButton.dataset.setStatus;
+    // 詳細入力欄がある区分（不参加/未定/時間限定）を選んだら、
+    // 理由やコメントを入力し忘れないようその場で詳細欄を開く
+    if (chosenStatus === '不参加' || chosenStatus === '未定' || chosenStatus === '時間限定') {
+      expandedChipKeys.add(`${eventToken}_${memberId}`);
+    }
+    if (isAnswerLocked(event)) {
+      alert('回答期限を過ぎているため送信できません。');
+      return;
+    }
+    stageInlineAnswerChange(eventToken, memberId, chosenStatus);
   } else if (clearButton) {
-    clearInlineAnswer(eventToken, memberId);
+    if (isAnswerLocked(event)) {
+      alert('回答期限を過ぎているため取り消せません。');
+      return;
+    }
+    stageInlineAnswerChange(eventToken, memberId, '未回答');
   } else if (saveExtraButton) {
+    if (isAnswerLocked(event)) {
+      alert('回答期限を過ぎているため送信できません。');
+      return;
+    }
     const status = chip.querySelector('.status-btn.active')?.dataset.setStatus || '未定';
     const pendingEl = chip.querySelector('[data-pending-until]');
     const reasonCategoryEl = chip.querySelector('[data-reason-category]');
@@ -1337,7 +1461,7 @@ function handlePublicListClick(domEvent) {
     const commentEl = chip.querySelector('[data-comment]');
     const limitedStartEl = chip.querySelector('[data-limited-start]');
     const limitedEndEl = chip.querySelector('[data-limited-end]');
-    submitInlineAnswer(eventToken, memberId, status, {
+    stageInlineAnswerChange(eventToken, memberId, status, {
       pendingUntil: pendingEl ? pendingEl.value : '',
       reasonCategory: reasonCategoryEl ? reasonCategoryEl.value : '',
       reasonDetail: reasonDetailEl ? reasonDetailEl.value : '',
@@ -1348,58 +1472,104 @@ function handlePublicListClick(domEvent) {
   }
 }
 
-async function submitInlineAnswer(eventToken, memberId, status, extra) {
-  const event = publicData.events.find(item => item.answerToken === eventToken);
-  if (!event) return;
-  if (isAnswerLocked(event)) {
-    alert('回答期限を過ぎているため送信できません。');
-    return;
-  }
-  const previous = findAnswerForMember(event, memberId);
-  const payload = {
-    event_id: event.eventId,
-    member_id: memberId,
-    status,
-    pending_until: status === '未定' ? nullIfEmpty(extra && extra.pendingUntil) : null,
-    comment: (extra && extra.comment) ? extra.comment.trim() : '',
-    reason_category: (extra && extra.reasonCategory) || '',
-    reason_detail: (extra && extra.reasonDetail) ? extra.reasonDetail.trim() : '',
-    limited_start_time: status === '時間限定' ? nullIfEmpty(extra && extra.limitedStartTime) : null,
-    limited_end_time: status === '時間限定' ? nullIfEmpty(extra && extra.limitedEndTime) : null,
-    updated_at: new Date().toISOString()
-  };
-
-  const { error } = await supabaseClient.from('answers').upsert(payload, { onConflict: 'event_id,member_id' });
-  if (error) {
-    alert(error.message);
-    return;
-  }
-
-  const member = publicData.members.find(item => item.memberId === memberId);
-  const detail = [payload.comment || payload.reason_detail, proxyLogSuffix(memberId)].filter(Boolean).join(' ');
-  await appendLog('日程調整回答', event.eventId, event.eventName, memberId, member ? member.name : '', previous ? previous.status : '未回答', status, detail);
-  flashCompletionOverlay('回答を反映しました');
-  await refreshAll();
+function getRawAnswerStatus(eventId, memberId) {
+  const row = lastRawAnswers.find(item => item.event_id === eventId && item.member_id === memberId);
+  return row ? row.status : '未回答';
 }
 
-async function clearInlineAnswer(eventToken, memberId) {
+// 予定一覧でのその場回答は即時保存せず、ここで保留状態に積んでおき、
+// 右下の「回答完了」ボタンでまとめてDBへ反映する
+function stageInlineAnswerChange(eventToken, memberId, status, extra) {
+  const key = `${eventToken}_${memberId}`;
   const event = publicData.events.find(item => item.answerToken === eventToken);
   if (!event) return;
-  if (isAnswerLocked(event)) {
-    alert('回答期限を過ぎているため取り消せません。');
-    return;
-  }
-  if (!confirm('この回答を取り消して未回答に戻しますか？')) return;
+  const existing = inlineAnswerPendingChanges.get(key);
+  // バッチ内で同じ人・同じ予定を何度も変更しても、ログに出す「変更前」は
+  // バッチが始まる前の本当の値のまま保つ
+  const previousStatus = existing ? existing.previousStatus : getRawAnswerStatus(event.eventId, memberId);
+  inlineAnswerPendingChanges.set(key, {
+    status,
+    pendingUntil: (extra && extra.pendingUntil) || '',
+    comment: (extra && extra.comment) || '',
+    reasonCategory: (extra && extra.reasonCategory) || '',
+    reasonDetail: (extra && extra.reasonDetail) || '',
+    limitedStartTime: (extra && extra.limitedStartTime) || '',
+    limitedEndTime: (extra && extra.limitedEndTime) || '',
+    previousStatus
+  });
+  rebuildPublicEvents();
+  updateInlineAnswerBar();
+}
 
-  const previous = findAnswerForMember(event, memberId);
-  const { error } = await supabaseClient.from('answers').delete().eq('event_id', event.eventId).eq('member_id', memberId);
-  if (error) {
-    alert(error.message);
-    return;
+function updateInlineAnswerBar() {
+  const bar = document.getElementById('inlineAnswerBar');
+  if (!bar) return;
+  bar.classList.toggle('above-mode-switcher', isAdmin());
+  const count = inlineAnswerPendingChanges.size;
+  const commitBtn = document.getElementById('inlineAnswerCommitButton');
+  const cancelBtn = document.getElementById('inlineAnswerCancelButton');
+  const indicator = document.getElementById('inlineAnswerPendingIndicator');
+  if (commitBtn) commitBtn.disabled = count === 0;
+  if (cancelBtn) cancelBtn.disabled = count === 0;
+  if (indicator) indicator.textContent = count ? `未保存の回答が${count}件あります` : '';
+}
+
+function cancelInlineAnswerChanges() {
+  if (!inlineAnswerPendingChanges.size) return;
+  if (!confirm('保存されていない回答をすべて取り消しますか？')) return;
+  inlineAnswerPendingChanges.clear();
+  rebuildPublicEvents();
+  updateInlineAnswerBar();
+}
+
+async function commitInlineAnswerChanges() {
+  if (!inlineAnswerPendingChanges.size) return;
+  const button = document.getElementById('inlineAnswerCommitButton');
+  const restore = setButtonBusy(button, '保存中...');
+  const entries = Array.from(inlineAnswerPendingChanges.entries());
+  const errors = [];
+
+  for (const [key, change] of entries) {
+    const separatorIndex = key.lastIndexOf('_');
+    const eventToken = key.slice(0, separatorIndex);
+    const memberId = key.slice(separatorIndex + 1);
+    const event = publicData.events.find(item => item.answerToken === eventToken);
+    if (!event) continue;
+    const member = publicData.members.find(item => item.memberId === memberId);
+
+    if (change.status === '未回答') {
+      const { error } = await supabaseClient.from('answers').delete().eq('event_id', event.eventId).eq('member_id', memberId);
+      if (error) { errors.push(error.message); continue; }
+      await appendLog('回答取消', event.eventId, event.eventName, memberId, member ? member.name : '', change.previousStatus, '未回答', proxyLogSuffix(memberId));
+      continue;
+    }
+
+    const payload = {
+      event_id: event.eventId,
+      member_id: memberId,
+      status: change.status,
+      pending_until: change.status === '未定' ? nullIfEmpty(change.pendingUntil) : null,
+      comment: change.comment ? change.comment.trim() : '',
+      reason_category: change.reasonCategory || '',
+      reason_detail: change.reasonDetail ? change.reasonDetail.trim() : '',
+      limited_start_time: change.status === '時間限定' ? nullIfEmpty(change.limitedStartTime) : null,
+      limited_end_time: change.status === '時間限定' ? nullIfEmpty(change.limitedEndTime) : null,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await supabaseClient.from('answers').upsert(payload, { onConflict: 'event_id,member_id' });
+    if (error) { errors.push(error.message); continue; }
+    const detail = [payload.comment || payload.reason_detail, proxyLogSuffix(memberId)].filter(Boolean).join(' ');
+    await appendLog('出欠回答', event.eventId, event.eventName, memberId, member ? member.name : '', change.previousStatus, change.status, detail);
   }
 
-  const member = publicData.members.find(item => item.memberId === memberId);
-  await appendLog('回答取消', event.eventId, event.eventName, memberId, member ? member.name : '', previous ? previous.status : '', '未回答', proxyLogSuffix(memberId));
+  restore();
+  inlineAnswerPendingChanges.clear();
+  updateInlineAnswerBar();
+  if (errors.length) {
+    alert(`一部の回答の保存に失敗しました：${errors.join(' / ')}`);
+  } else {
+    flashCompletionOverlay('回答を送信しました');
+  }
   await refreshAll();
 }
 
@@ -1950,6 +2120,11 @@ function switchView(name) {
   document.body.classList.toggle('top-active', name === 'top');
   const backdrop = document.getElementById('topPhotoBackdrop');
   if (backdrop) backdrop.classList.toggle('hidden', name !== 'top');
+  const inlineAnswerBar = document.getElementById('inlineAnswerBar');
+  if (inlineAnswerBar) {
+    inlineAnswerBar.classList.toggle('hidden', name !== 'public');
+    if (name === 'public') updateInlineAnswerBar();
+  }
   if (name === 'poll') initPollView();
 }
 
@@ -1972,6 +2147,16 @@ async function loadTopPhotoList() {
   topPhotoFiles = error ? [] : (data || []).filter(file => file.name && !file.name.endsWith('/'));
 }
 
+// Fisher-Yates。毎回ログイン・再読み込みのたびに表示順を変えるため
+function shuffleArray(list) {
+  const result = list.slice();
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 async function initTopHero() {
   const media = document.getElementById('topHeroMedia');
   if (!media || media.dataset.loaded) return;
@@ -1983,7 +2168,7 @@ async function initTopHero() {
   const { data, error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).createSignedUrls(paths, 3600);
   if (error || !data) return;
 
-  data.forEach(item => {
+  shuffleArray(data).forEach(item => {
     if (!item.signedUrl) return;
     const slide = document.createElement('div');
     slide.className = 'top-hero-slide' + (topHeroSlides.length === 0 ? ' active' : '');
@@ -2423,7 +2608,7 @@ function isSafeHttpUrl(value) {
 }
 
 // ==========================================================================
-// 候補日程調整（期間指定・ドラッグ入力の空き時間集計）
+// 日程アンケート（期間指定・ドラッグ入力の空き時間集計）
 // 特定の1予定への出欠（answers）とは別物。新しい予定を立てる前段階として、
 // 期間内の日付×時間帯ごとに各メンバーが空いている時間を申告し合い、
 // 重なりが多い時間帯・日を自動で提案する。
@@ -2440,8 +2625,45 @@ function normalizePoll(row) {
     dayEndMinutes: Number.isFinite(row.day_end_minutes) ? row.day_end_minutes : 1320,
     slotMinutes: Number.isFinite(row.slot_minutes) ? row.slot_minutes : 30,
     publicState: row.public_state || '公開',
+    answerToken: row.answer_token || '',
     createdAt: row.created_at || ''
   };
+}
+
+function createPollScheduleUrl(token) {
+  const base = String(window.location.href || '').split('?')[0].split('#')[0];
+  return `${base}?poll=${encodeURIComponent(token)}`;
+}
+
+function createPollShareText(poll) {
+  return [
+    `${poll.title || ''}`,
+    `期間：${formatDate(poll.periodStart) || '-'} 〜 ${formatDate(poll.periodEnd) || '-'}`,
+    `日程アンケートリンク：${createPollScheduleUrl(poll.answerToken)}`
+  ].join('\n');
+}
+
+function copyPollShareText(pollId, buttonEl) {
+  const poll = availabilityPolls.find(item => item.pollId === pollId);
+  if (!poll) return;
+  const text = createPollShareText(poll);
+  const onDone = () => flashButtonText(buttonEl, 'コピーしました');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onDone).catch(() => showSharePrompt(text));
+  } else {
+    showSharePrompt(text);
+  }
+}
+
+async function openPollByToken(token) {
+  pollViewInitialized = true;
+  await loadAvailabilityPolls();
+  const poll = availabilityPolls.find(item => item.answerToken === token && item.publicState !== '削除');
+  if (!poll) return false;
+  switchView('poll');
+  document.getElementById('pollSelect').value = poll.pollId;
+  await onPollSelectChange();
+  return true;
 }
 
 async function loadAvailabilityPolls() {
@@ -2457,14 +2679,14 @@ function renderPollSelect() {
   if (!select) return;
   const visible = availabilityPolls.filter(poll => poll.publicState !== '削除');
   const previous = select.value;
-  select.innerHTML = '<option value="">候補日程調整を選択してください</option>' +
+  select.innerHTML = '<option value="">日程アンケートを選択してください</option>' +
     visible.map(poll => `<option value="${escapeAttr(poll.pollId)}">${escapeHtml(poll.title)}（${escapeHtml(formatDate(poll.periodStart))}〜${escapeHtml(formatDate(poll.periodEnd))}）</option>`).join('');
   if (visible.some(poll => poll.pollId === previous)) {
     select.value = previous;
   } else if (currentPoll) {
     currentPoll = null;
     document.getElementById('pollBox').classList.add('hidden');
-    document.getElementById('pollStatus').textContent = 'この候補日程調整は終了しました。候補日程調整を選択してください。';
+    document.getElementById('pollStatus').textContent = 'この日程アンケートは終了しました。日程アンケートを選択してください。';
   }
 }
 
@@ -2478,7 +2700,7 @@ async function onPollSelectChange() {
   if (!pollId) {
     currentPoll = null;
     document.getElementById('pollBox').classList.add('hidden');
-    document.getElementById('pollStatus').textContent = '候補日程調整を選択してください。';
+    document.getElementById('pollStatus').textContent = '日程アンケートを選択してください。';
     return;
   }
   currentPoll = availabilityPolls.find(poll => poll.pollId === pollId);
@@ -2488,6 +2710,7 @@ async function onPollSelectChange() {
   document.getElementById('pollNote').textContent = currentPoll.note || '';
   pollWeekOffset = 0;
   pollMode = 'input';
+  pollInputArmed = false;
   pollActingMemberId = '';
   setupPollActingMemberSelect();
   await loadPollSlots(pollId);
@@ -2566,7 +2789,7 @@ async function resetPollSelection() {
   if (!currentPoll) return;
   const memberId = getPollActingMemberId();
   if (!memberId) return;
-  if (!confirm('この候補日程調整で入力した空き時間をすべてリセットしますか？')) return;
+  if (!confirm('この日程アンケートで入力した空き時間をすべてリセットしますか？')) return;
   const { error } = await supabaseClient.from('availability_slots')
     .delete()
     .eq('poll_id', currentPoll.pollId)
@@ -2642,6 +2865,12 @@ function movePollWeek(delta) {
 
 function setPollMode(mode) {
   pollMode = mode;
+  if (mode === 'input') pollInputArmed = false;
+  renderPollView();
+}
+
+function armPollInput() {
+  pollInputArmed = true;
   renderPollView();
 }
 
@@ -2652,6 +2881,9 @@ function renderPollView() {
   document.getElementById('pollInputControls').classList.toggle('hidden', pollMode !== 'input');
   document.getElementById('pollNoteInputWrap').classList.toggle('hidden', pollMode !== 'input');
   document.getElementById('pollSuggestions').classList.toggle('hidden', pollMode !== 'result');
+  document.getElementById('pollArmButton').classList.toggle('hidden', !(pollMode === 'input' && !pollInputArmed));
+  document.getElementById('pollInputArmHint').classList.toggle('hidden', !(pollMode === 'input' && !pollInputArmed));
+  document.getElementById('pollInputHint').classList.toggle('hidden', !(pollMode === 'input' && pollInputArmed));
 
   const actingMemberId = getPollActingMemberId();
   const actingNote = currentPollNotes.find(item => item.memberId === actingMemberId);
@@ -2718,7 +2950,7 @@ function renderPollView() {
         if (pollMode === 'input') {
           const selected = mySelectedKeys.has(key);
           const label = `${d.getMonth() + 1}/${d.getDate()} ${minutesToLabel(start)}`;
-          return `<div class="poll-cell ${selected ? 'selected' : ''}" data-date="${escapeAttr(iso)}" data-start="${start}" title="${escapeAttr(minutesToLabel(start))}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="${escapeAttr(label)}${selected ? '（選択中）' : ''}"></div>`;
+          return `<div class="poll-cell ${selected ? 'selected' : ''} ${pollInputArmed ? '' : 'locked'}" data-date="${escapeAttr(iso)}" data-start="${start}" title="${escapeAttr(minutesToLabel(start))}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="${escapeAttr(label)}${selected ? '（選択中）' : ''}"></div>`;
         }
         const count = countMap.get(key) || 0;
         const intensity = count ? Math.min(1, 0.15 + 0.75 * (count / maxCount)) : 0;
@@ -2841,7 +3073,7 @@ function setupPollGridEvents() {
 }
 
 function onPollCellKeyDown(domEvent) {
-  if (pollMode !== 'input') return;
+  if (pollMode !== 'input' || !pollInputArmed) return;
   if (domEvent.key !== 'Enter' && domEvent.key !== ' ') return;
   const cell = domEvent.target.closest('.poll-cell');
   if (!cell || !cell.dataset.date) return;
@@ -2868,7 +3100,7 @@ function applyPollDragToCell(cell) {
 }
 
 function onPollCellDown(domEvent) {
-  if (pollMode !== 'input') return;
+  if (pollMode !== 'input' || !pollInputArmed) return;
   const cell = domEvent.target.closest('.poll-cell');
   if (!cell || !cell.dataset.date) return;
   domEvent.preventDefault();
@@ -2883,7 +3115,7 @@ function onPollCellEnter(domEvent) {
 }
 
 function onPollCellTouchStart(domEvent) {
-  if (pollMode !== 'input') return;
+  if (pollMode !== 'input' || !pollInputArmed) return;
   const touch = domEvent.touches[0];
   const el = document.elementFromPoint(touch.clientX, touch.clientY);
   const cell = el && el.closest ? el.closest('.poll-cell') : null;
@@ -2935,7 +3167,7 @@ async function commitPendingPollChanges() {
   if (!currentPoll || !pollPendingChanges.size) return;
   const memberId = getPollActingMemberId();
   if (!memberId) {
-    alert(isAdmin() ? '代理入力するメンバーを選択してください。' : 'メンバーに紐付いたアカウントでログインしてください。');
+    alert(canProxyOthers() ? '代理入力するメンバーを選択してください。' : 'メンバーに紐付いたアカウントでログインしてください。');
     return;
   }
 
@@ -3018,7 +3250,7 @@ async function savePollForm() {
     return;
   }
 
-  await appendLog(isEdit ? '候補日程調整編集' : '候補日程調整作成', '', '', '', '', '', '', title);
+  await appendLog(isEdit ? '日程アンケート編集' : '日程アンケート作成', '', '', '', '', '', '', title);
   showMessage('pollFormMessage', '保存しました。', true);
   clearPollForm();
   await loadAvailabilityPolls();
@@ -3051,13 +3283,13 @@ function editPollForm(pollId) {
 }
 
 async function deletePollEntry(pollId) {
-  if (!isAdmin() || !confirm('この候補日程調整を削除しますか？（メンバーが入力した空き時間データは残ります）')) return;
+  if (!isAdmin() || !confirm('この日程アンケートを削除しますか？（メンバーが入力した空き時間データは残ります）')) return;
   const { error } = await supabaseClient.from('availability_polls').update({ public_state: '削除' }).eq('id', pollId);
   if (error) {
     alert(error.message);
     return;
   }
-  await appendLog('候補日程調整削除', '', '', '', '', '', '', '');
+  await appendLog('日程アンケート削除', '', '', '', '', '', '', '');
   await loadAvailabilityPolls();
 }
 
@@ -3068,7 +3300,7 @@ async function restorePollEntry(pollId) {
     alert(error.message);
     return;
   }
-  await appendLog('候補日程調整復元', '', '', '', '', '', '', '');
+  await appendLog('日程アンケート復元', '', '', '', '', '', '', '');
   await loadAvailabilityPolls();
 }
 
@@ -3080,6 +3312,7 @@ function renderAdminPolls() {
       <td data-label="状態">${escapeHtml(poll.publicState === '削除' ? '削除済み' : '公開')}</td>
       <td data-label="タイトル">${escapeHtml(poll.title)}</td>
       <td data-label="期間">${escapeHtml(formatDate(poll.periodStart))}〜${escapeHtml(formatDate(poll.periodEnd))}</td>
+      <td class="wrap" data-label="共有リンク"><div class="share-actions"><a href="${escapeAttr(createPollScheduleUrl(poll.answerToken))}" target="_blank" rel="noopener noreferrer">日程アンケートリンク</a><button type="button" data-copy-poll-share="${escapeAttr(poll.pollId)}">共有文コピー</button></div></td>
       <td data-label="操作">
         <button type="button" data-edit-poll="${escapeAttr(poll.pollId)}">編集</button>
         ${poll.publicState === '削除'
@@ -3088,14 +3321,16 @@ function renderAdminPolls() {
       </td>
     </tr>
   `).join('');
-  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>タイトル</th><th>期間</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="4">候補日程調整がありません。</td></tr>'}</tbody></table></div>`;
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>タイトル</th><th>期間</th><th>共有リンク</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="5">日程アンケートがありません。</td></tr>'}</tbody></table></div>`;
 }
 
 function handleAdminPollsClick(domEvent) {
   const editButton = domEvent.target.closest('[data-edit-poll]');
   const deleteButton = domEvent.target.closest('[data-delete-poll]');
   const restoreButton = domEvent.target.closest('[data-restore-poll]');
+  const copyButton = domEvent.target.closest('[data-copy-poll-share]');
   if (editButton) editPollForm(editButton.dataset.editPoll);
   else if (deleteButton) deletePollEntry(deleteButton.dataset.deletePoll);
   else if (restoreButton) restorePollEntry(restoreButton.dataset.restorePoll);
+  else if (copyButton) copyPollShareText(copyButton.dataset.copyPollShare, copyButton);
 }

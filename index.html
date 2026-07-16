@@ -18,7 +18,7 @@
     <section class="login-card">
       <div class="brand-mark"><img src="./logo.jpg" alt="若衆の絆" onerror="this.remove()"><span>若衆</span></div>
       <h1>メンバー専用サイト</h1>
-      <p>予定確認、日程調整回答、メンバー管理をここで行います。</p>
+      <p>予定確認、出欠回答、メンバー管理をここで行います。</p>
       <div id="configWarning" class="notice hidden"></div>
       <form id="loginForm" class="form-stack">
         <label>
@@ -140,8 +140,8 @@
     <nav class="tabs">
       <button class="tab" type="button" data-tab="top" onclick="switchView('top')">トップ</button>
       <button class="tab" type="button" data-tab="public" onclick="switchView('public')">予定一覧</button>
-      <button class="tab" type="button" data-tab="answer" onclick="switchView('answer')">日程調整回答</button>
-      <button class="tab" type="button" data-tab="poll" onclick="switchView('poll')">候補日程調整</button>
+      <button class="tab" type="button" data-tab="answer" onclick="switchView('answer')">出欠回答</button>
+      <button class="tab" type="button" data-tab="poll" onclick="switchView('poll')">日程アンケート</button>
       <button id="eventFormTabButton" class="tab hidden" type="button" data-tab="eventForm" onclick="switchView('eventForm')">予定追加</button>
       <button id="adminTabButton" class="tab hidden" type="button" data-tab="admin" onclick="switchView('admin')">管理</button>
       <div id="topNextEvent" class="top-hero-stat"></div>
@@ -192,7 +192,7 @@
 
     <section id="answerView" class="view">
       <section class="panel">
-        <h2>日程調整回答</h2>
+        <h2>出欠回答</h2>
         <p class="muted">「予定一覧」タブでも各予定のその場で回答できます。ここは共有された日程調整リンクから開いた場合や、予定を選んで回答したい場合に使います。</p>
         <label class="wide-field">
           予定を選択
@@ -252,15 +252,16 @@
 
     <section id="pollView" class="view">
       <section class="panel">
-        <h2>候補日程調整</h2>
-        <p class="muted">新しい予定を立てる前に、期間内でみんなが空いている時間帯をドラッグで申告し合う機能です。予定そのものの出欠は「日程調整回答」で行います。</p>
+        <h2>日程アンケート</h2>
+        <p class="muted">新しい予定を立てる前に、期間内でみんなが空いている時間帯をドラッグで申告し合う機能です。予定そのものの出欠は「出欠回答」で行います。</p>
         <label class="wide-field">
           調整を選択
-          <select id="pollSelect" onchange="onPollSelectChange()"><option value="">候補日程調整を選択してください</option></select>
+          <select id="pollSelect" onchange="onPollSelectChange()"><option value="">日程アンケートを選択してください</option></select>
         </label>
-        <div id="pollStatus" class="status" role="status" aria-live="polite">候補日程調整を選択してください。</div>
+        <div id="pollStatus" class="status" role="status" aria-live="polite">日程アンケートを選択してください。</div>
         <div id="pollBox" class="hidden">
           <p id="pollNote" class="muted"></p>
+          <div class="share-actions"><button id="pollShareButton" type="button" onclick="copyPollShareText(currentPoll && currentPoll.pollId, this)">共有文コピー</button></div>
           <label id="pollActingMemberWrap" class="wide-field hidden">
             代理入力するメンバー（管理者のみ）
             <select id="pollActingMemberSelect" onchange="onPollActingMemberChange()"><option value="">自分</option></select>
@@ -277,7 +278,9 @@
             </div>
           </div>
           <div id="pollInputControls">
-            <p id="pollInputHint" class="muted">マス目をドラッグすると、その時間帯に空いている/空いていないを切り替えられます（スマホは指でなぞってください）。選び終わったら「完了」を押すと反映されます。<button type="button" class="link-button" onclick="resetPollSelection()">入力をリセット</button></p>
+            <p id="pollInputArmHint" class="muted hidden">スクロール中に誤って入力されるのを防ぐため、マス目はロックされています。「入力開始」を押すと編集できるようになります。</p>
+            <button id="pollArmButton" type="button" class="primary hidden" onclick="armPollInput()">入力開始</button>
+            <p id="pollInputHint" class="muted hidden">マス目をドラッグすると、その時間帯に空いている/空いていないを切り替えられます（スマホは指でなぞってください）。選び終わったら「完了」を押すと反映されます。<button type="button" class="link-button" onclick="resetPollSelection()">入力をリセット</button></p>
             <div class="poll-commit-row">
               <span id="pollPendingIndicator" class="muted"></span>
               <button id="pollCommitButton" type="button" class="primary" onclick="commitPendingPollChanges()" disabled>完了</button>
@@ -342,7 +345,7 @@
         <button class="subtab" type="button" data-admin-tab="logs" onclick="switchAdminTab('logs')">ログ</button>
         <button class="subtab" type="button" data-admin-tab="options" onclick="switchAdminTab('options')">分類管理</button>
         <button class="subtab" type="button" data-admin-tab="photos" onclick="switchAdminTab('photos')">トップ写真</button>
-        <button class="subtab" type="button" data-admin-tab="polls" onclick="switchAdminTab('polls')">候補日程調整</button>
+        <button class="subtab" type="button" data-admin-tab="polls" onclick="switchAdminTab('polls')">日程アンケート</button>
       </nav>
 
       <section class="panel admin-section" data-admin-section="memberForm">
@@ -374,7 +377,7 @@
         </div>
         <p class="muted">「在籍状態」を退会にすると、退会日と現役名簿の非表示が自動で設定されます。過去の出欠履歴は消えません。</p>
 
-        <div class="panel-head"><h3>装備・担当</h3></div>
+        <div class="panel-head"><h3>衣装・担当</h3></div>
         <div class="grid3">
           <label>袴サイズ<input id="costumeSize" type="text"></label>
           <label>Tシャツサイズ<input id="tshirtSize" type="text"></label>
@@ -411,7 +414,7 @@
 
       <section class="panel admin-section" data-admin-section="options">
         <h2>分類の選択肢を管理</h2>
-        <p class="muted">予定の「分類」と、日程調整回答の「理由カテゴリ」の選択肢を追加・削除できます。</p>
+        <p class="muted">予定の「分類」と、出欠回答の「理由カテゴリ」の選択肢を追加・削除できます。</p>
         <div class="panel-head"><h3>予定の分類</h3></div>
         <div id="eventCategoryOptions" class="option-manager"></div>
         <div class="option-add">
@@ -439,8 +442,8 @@
       </section>
 
       <section class="panel admin-section" data-admin-section="polls">
-        <h2>候補日程調整の作成・管理</h2>
-        <p class="muted">期間と1日の時間帯を決めて作成すると、メンバーは「候補日程調整」タブで空き時間を申告できるようになります。</p>
+        <h2>日程アンケートの作成・管理</h2>
+        <p class="muted">期間と1日の時間帯を決めて作成すると、メンバーは「日程アンケート」タブで空き時間を申告できるようになります。</p>
         <input id="pollId" type="hidden">
         <div class="grid3">
           <label>タイトル<input id="pollTitle" type="text" placeholder="例：9月の演奏依頼の日程調整"></label>
@@ -456,11 +459,11 @@
         </div>
         <label class="wide-field">備考<textarea id="pollNoteInput"></textarea></label>
         <div class="button-row">
-          <button id="savePollButton" class="primary" type="button" onclick="savePollForm()">候補日程調整を保存</button>
+          <button id="savePollButton" class="primary" type="button" onclick="savePollForm()">日程アンケートを保存</button>
           <button type="button" onclick="clearPollForm()">入力をクリア</button>
         </div>
         <div id="pollFormMessage" class="message" role="status" aria-live="polite"></div>
-        <div class="panel-head"><h3>作成済みの候補日程調整</h3></div>
+        <div class="panel-head"><h3>作成済みの日程アンケート</h3></div>
         <div id="adminPolls"></div>
       </section>
     </section>
@@ -468,6 +471,14 @@
 
   <div id="completionOverlay" class="completion-overlay hidden">
     <div class="completion-badge" role="status" aria-live="polite"></div>
+  </div>
+
+  <div id="inlineAnswerBar" class="inline-answer-bar hidden">
+    <span id="inlineAnswerPendingIndicator" class="inline-answer-pending-indicator" role="status" aria-live="polite"></span>
+    <div class="inline-answer-bar-buttons">
+      <button id="inlineAnswerCommitButton" class="primary" type="button" onclick="commitInlineAnswerChanges()" disabled>回答完了</button>
+      <button id="inlineAnswerCancelButton" type="button" onclick="cancelInlineAnswerChanges()" disabled>キャンセル</button>
+    </div>
   </div>
 
   <div id="adminModeSwitcher" class="admin-mode-switcher hidden">
