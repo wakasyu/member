@@ -105,13 +105,12 @@
 
 ## 未確認・保留中の項目
 
-- 「理由カテゴリが分類管理画面から追加できない」という報告：原因が
-  コード上は見当たらず、再現待ち（実際のエラーメッセージ待ち）
-- スタッフ用の共通Supabaseアカウントを作成済みか未確認。未作成なら
-  ダッシュボードのAuthentication > Usersで、メールアドレスを`app.js`内の
-  `STAFF_LOGIN_EMAIL`（`staff@wakasyu.local`）と完全一致させて作成し、
-  SQL Editorで`insert into public.profiles (id, display_name, role) values ('（UUID）', 'スタッフ', 'staff');`
-  を実行する必要がある
+- スタッフ用の共通Supabaseアカウントは**意図的に未作成**（必要になったら
+  作成する方針。手順：ダッシュボードのAuthentication > Usersで、メール
+  アドレスを`app.js`内の`STAFF_LOGIN_EMAIL`（`staff@wakasyu.local`）と
+  完全一致させて作成し、SQL Editorで
+  `insert into public.profiles (id, display_name, role) values ('（UUID）', 'スタッフ', 'staff');`
+  を実行する）
 - 候補日程調整は週表示のみで月表示は無い（期間内を週送りする形）
 - メンバーのログインアカウント発行は招待リンクでセルフサービス化済み。
   管理者アカウントの追加だけは今もダッシュボードからの手動作業
