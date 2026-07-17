@@ -235,6 +235,12 @@ textarea {
   font-size: 16px;
   font-weight: 400;
   color: var(--text);
+  /* selectは中身（一番長い予定名などのoption）に合わせて箱自体が
+     広がってしまうことがあり、それが原因で画面がはみ出す。
+     幅を親要素いっぱいに固定し、はみ出し分は中で省略させる */
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 .event-target-list {
@@ -1561,23 +1567,15 @@ body.top-active .top-hero-stat.clickable:hover {
 
 .inline-answer-bar-buttons {
   display: flex;
+  flex-direction: column;
   gap: 8px;
+  /* JSで表示モード切替（.admin-mode-switcher）と同じ幅に揃える。
+     切替が無い（管理者以外の）場合はボタン本来の大きさのまま */
+  width: var(--inline-answer-bar-width, auto);
 }
 
-@media (max-width: 480px) {
-  .inline-answer-bar {
-    left: 10px;
-    right: 10px;
-    align-items: stretch;
-  }
-
-  .inline-answer-bar-buttons {
-    flex-direction: column;
-  }
-
-  .inline-answer-bar-buttons button {
-    width: 100%;
-  }
+.inline-answer-bar-buttons button {
+  width: 100%;
 }
 
 @media (max-width: 920px) {
