@@ -1527,6 +1527,15 @@ function updateInlineAnswerBar() {
   }
 }
 
+// 右下固定の表示モード切替・まとめて回答バーが、スクロールし切った先の
+// ボタンなどに重なってしまわないよう、画面下に必要な分だけ余白を確保する
+function updateFloatingUiClearance(showsAnswerBar) {
+  const shell = document.getElementById('appShell');
+  if (!shell) return;
+  shell.classList.toggle('has-mode-switcher', isAdmin());
+  shell.classList.toggle('has-answer-bar', showsAnswerBar);
+}
+
 function cancelInlineAnswerChanges() {
   if (!inlineAnswerPendingChanges.size) return;
   if (!confirm('保存されていない回答をすべて取り消しますか？')) return;
@@ -2133,11 +2142,14 @@ function switchView(name) {
   document.body.classList.toggle('top-active', name === 'top');
   const backdrop = document.getElementById('topPhotoBackdrop');
   if (backdrop) backdrop.classList.toggle('hidden', name !== 'top');
+  // スタッフは出欠回答をしない（できない）ので、まとめて回答バーは不要
+  const showsAnswerBar = name === 'public' && !isStaff();
   const inlineAnswerBar = document.getElementById('inlineAnswerBar');
   if (inlineAnswerBar) {
-    inlineAnswerBar.classList.toggle('hidden', name !== 'public');
-    if (name === 'public') updateInlineAnswerBar();
+    inlineAnswerBar.classList.toggle('hidden', !showsAnswerBar);
+    if (showsAnswerBar) updateInlineAnswerBar();
   }
+  updateFloatingUiClearance(showsAnswerBar);
   if (name === 'poll') initPollView();
 }
 

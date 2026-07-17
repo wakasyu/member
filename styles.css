@@ -305,6 +305,17 @@ textarea {
   padding: 18px;
 }
 
+/* 右下固定の表示モード切替・まとめて回答バーがページ最下部のボタンなどに
+   重ならないよう、それらが出ている時だけ下に余白を確保する */
+.shell.has-mode-switcher,
+.shell.has-answer-bar {
+  padding-bottom: 90px;
+}
+
+.shell.has-mode-switcher.has-answer-bar {
+  padding-bottom: 160px;
+}
+
 .site-header {
   display: flex;
   justify-content: space-between;
@@ -526,6 +537,7 @@ textarea {
 
 .panel-inset {
   margin-top: 16px;
+  margin-bottom: 20px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
