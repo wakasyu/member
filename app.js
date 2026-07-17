@@ -1511,19 +1511,19 @@ function updateInlineAnswerBar() {
   const indicator = document.getElementById('inlineAnswerPendingIndicator');
   if (commitBtn) commitBtn.disabled = count === 0;
   if (cancelBtn) cancelBtn.disabled = count === 0;
-  if (indicator) indicator.textContent = count ? `未保存の回答が${count}件あります` : '';
+  if (indicator) {
+    indicator.textContent = count ? `未保存の回答が${count}件あります` : '';
+    indicator.classList.toggle('hidden', count === 0);
+  }
 
-  // ボタンが大きくなりすぎないよう、右下の表示モード切替
-  // （編集/閲覧/メンバー）と同じ幅に揃える
+  // バー全体（枠ごと）が大きくなりすぎないよう、右下の表示モード切替
+  // （編集/閲覧/メンバー）の外枠と同じ幅に揃える
   const switcher = document.getElementById('adminModeSwitcher');
-  const buttonsWrap = bar.querySelector('.inline-answer-bar-buttons');
-  if (buttonsWrap) {
-    if (switcher && !switcher.classList.contains('hidden')) {
-      const switcherWidth = switcher.getBoundingClientRect().width;
-      if (switcherWidth > 0) buttonsWrap.style.setProperty('--inline-answer-bar-width', `${switcherWidth}px`);
-    } else {
-      buttonsWrap.style.removeProperty('--inline-answer-bar-width');
-    }
+  if (switcher && !switcher.classList.contains('hidden')) {
+    const switcherWidth = switcher.getBoundingClientRect().width;
+    if (switcherWidth > 0) bar.style.setProperty('--inline-answer-bar-width', `${switcherWidth}px`);
+  } else {
+    bar.style.removeProperty('--inline-answer-bar-width');
   }
 }
 

@@ -383,6 +383,12 @@ textarea {
   gap: 4px;
 }
 
+/* 「更新」「ログアウト」の見た目の大きさを揃える（片方だけ横幅いっぱいに
+   広がって不揃いに見えるのを防ぐ） */
+.header-actions button {
+  min-width: 96px;
+}
+
 .refresh-status {
   margin: 0;
   font-size: 12px;
@@ -405,6 +411,8 @@ textarea {
 .answer-event {
   min-width: 0;
   overflow-wrap: break-word;
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
 
 .answer-event h3 {
@@ -1545,14 +1553,18 @@ body.top-active .top-hero-stat.clickable:hover {
   z-index: 850;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-  padding: 10px;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px;
   border-radius: 14px;
   background: rgba(255, 255, 255, .92);
   border: 1px solid var(--border);
   box-shadow: 0 8px 24px rgba(18, 59, 110, .18);
   backdrop-filter: blur(6px);
+  /* JSで表示モード切替（.admin-mode-switcher）の外枠と同じ幅に揃える
+     （枠ごとの大きさを合わせるため、内側のpaddingを含めた幅で比較する）。
+     切替が無い（管理者以外の）場合はボタン本来の大きさのまま */
+  width: var(--inline-answer-bar-width, auto);
 }
 
 .inline-answer-bar.above-mode-switcher {
@@ -1560,22 +1572,25 @@ body.top-active .top-hero-stat.clickable:hover {
 }
 
 .inline-answer-pending-indicator {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 800;
   color: var(--muted);
+  text-align: right;
 }
 
 .inline-answer-bar-buttons {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  /* JSで表示モード切替（.admin-mode-switcher）と同じ幅に揃える。
-     切替が無い（管理者以外の）場合はボタン本来の大きさのまま */
-  width: var(--inline-answer-bar-width, auto);
+  flex-direction: row;
+  gap: 6px;
 }
 
+/* 表示モード切替のボタンと近い大きさにして、一覧を覆う面積を抑える */
 .inline-answer-bar-buttons button {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 @media (max-width: 920px) {
@@ -1588,7 +1603,6 @@ body.top-active .top-hero-stat.clickable:hover {
     display: grid;
   }
 
-  .header-actions button,
   .button-row button,
   .toolbar > *,
   .filter-details-body > *,
