@@ -47,6 +47,7 @@ textarea {
   color: inherit;
   font: inherit;
   padding: 10px 11px;
+  max-width: 100%;
 }
 
 button {
@@ -212,6 +213,9 @@ textarea {
   font-size: 13px;
   color: var(--muted);
   font-weight: 800;
+  /* date/time等のネイティブ入力欄は最小表示幅を持っており、
+     これが無いとgridのセル自体がその最小幅ぶん広がって列からはみ出す */
+  min-width: 0;
 }
 
 /* ラベル文字は13pxのままでよいが、入力欄まで13pxを継承すると
