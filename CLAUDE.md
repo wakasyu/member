@@ -125,10 +125,9 @@
 - Edge Function `register-member`：登録完了メールは
   Resendではなく **Gmail SMTP**（`GMAIL_USER` / `GMAIL_APP_PASSWORD` secrets、
   denomailer経由）で送信するよう変更済み（Resendは送信ドメイン未認証だと
-  任意の宛先に送れないため）。**2026-07-17に初期パスワード発行ロジックと
-  招待トークンの排他制御を変更したため、`supabase functions deploy
-  register-member --no-verify-jwt` の再デプロイがまだ済んでいない
-  （このセッションではコード変更のみ・デプロイは未実施）。**
+  任意の宛先に送れないため）。2026-07-17に初期パスワード発行ロジックと
+  招待トークンの排他制御を変更し、`supabase functions deploy register-member
+  --no-verify-jwt` でv5としてデプロイ済み（ACTIVE、動作確認は未実施）。
 - Resendは無料枠でドメイン未認証のため、`ADMIN_NOTIFY_EMAIL`に設定した
   アカウント登録メール以外には送信できない（notify-answer用。register-member
   の方は上記の通りGmail SMTPに切り替え済みなのでこの制限を受けない）。
