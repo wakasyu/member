@@ -26,6 +26,7 @@
 | `supabase-schema.sql` | テーブル・RLS・Storageバケット・Webhook基盤。**何度実行しても安全**（if not exists / if existsで書いてある） |
 | `supabase/functions/notify-answer/index.ts` | 出欠が全員分揃った時の管理者向け通知メール（Resend） |
 | `supabase/functions/register-member/index.ts` | メンバー自己登録（招待リンク）用の公開エンドポイント |
+| `supabase/functions/delete-member/index.ts` | メンバー削除時にSupabase Authアカウントも削除する管理者専用エンドポイント（`--no-verify-jwt`にせず、呼び出し元が管理者かをJWTから検証） |
 | `logo.jpg` | 実際のクラブロゴ（Instagramアイコン用の正方形画像、丸枠で表示）。ブラウザのタブアイコン（favicon）とログイン画面・ヘッダーのロゴに使用 |
 | `home-icon.jpg` | スマホでホーム画面に追加した時だけに使う専用アイコン（`apple-touch-icon`と`manifest.json`のicon）。「政やの絆 若衆」のバナーロゴ |
 | `README.md` | セットアップ手順・機能一覧（利用者向け） |
@@ -127,7 +128,17 @@
   denomailer経由）で送信するよう変更済み（Resendは送信ドメイン未認証だと
   任意の宛先に送れないため）。2026-07-17に初期パスワード発行ロジックと
   招待トークンの排他制御を変更し、`supabase functions deploy register-member
-  --no-verify-jwt` でv5としてデプロイ済み（ACTIVE、動作確認は未実施）。
+  --no-verify-jwt` でv5としてデプロイ済み（ACTIVE、実際の登録で動作確認済み・
+  ランダムパスワード発行とメール送信を確認）。
+- Edge Function `delete-member`：2026-07-18にデプロイ済み（ACTIVE）。
+  `supabase functions deploy delete-member`（`--no-verify-jwt`は付けない。
+  register-memberと違い誰でも叩けると困るため、呼び出し元のJWTを
+  `auth.getUser()`で検証し`profiles.role === 'admin'`を確認してから
+  `auth.admin.deleteUser()`を実行する）。管理画面の「メンバー削除」が
+  このFunctionを呼ぶよう`deleteMember()`を変更済み。これが無い間に
+  自己登録→サイト側で削除、を繰り返すとSupabase Auth側にアカウントだけ
+  孤立して残り、同じメールアドレスで再登録できなくなる不具合があった
+  （2026-07-18に発覚、孤立していた3件のテストアカウントも削除して解消済み）。
 - Resendは無料枠でドメイン未認証のため、`ADMIN_NOTIFY_EMAIL`に設定した
   アカウント登録メール以外には送信できない（notify-answer用。register-member
   の方は上記の通りGmail SMTPに切り替え済みなのでこの制限を受けない）。

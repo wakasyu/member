@@ -1711,9 +1711,37 @@ async function deleteMember(memberId) {
   if (!isAdmin()) return;
   const member = publicData.members.find(item => item.memberId === memberId);
   if (!member) return;
-  if (!confirm(`「${member.name}」を削除します。この人の回答履歴も一緒に削除され、元に戻せません。よろしいですか？`)) return;
-  // 万一この人にログインアカウントが紐付いていた場合、参照が残らないようにしておく
-  await supabaseClient.from('profiles').update({ member_id: null }).eq('member_id', memberId);
+  if (!confirm(`「${member.name}」を削除します。ログインアカウントがある場合はそれも削除され、この人の回答履歴も一緒に削除されます。元に戻せません。よろしいですか？`)) return;
+
+  // ログインアカウントが紐付いている場合は、Supabase Auth側のアカウントごと
+  // 削除する（そうしないとメールアドレスが「使用済み」のまま残り、
+  // 同じメールアドレスで登録し直せなくなる）。profiles行はauth.usersへの
+  // 外部キーがon delete cascadeなので自動的に消える。
+  const { data: linkedProfiles, error: lookupError } = await supabaseClient
+    .from('profiles')
+    .select('id')
+    .eq('member_id', memberId);
+  if (lookupError) {
+    alert(lookupError.message);
+    return;
+  }
+  if (linkedProfiles && linkedProfiles.length) {
+    const { data: sessionData } = await supabaseClient.auth.getSession();
+    const accessToken = sessionData && sessionData.session ? sessionData.session.access_token : '';
+    for (const profile of linkedProfiles) {
+      try {
+        await callEdgeFunction('delete-member', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ userId: profile.id })
+        });
+      } catch (error) {
+        alert(`ログインアカウントの削除に失敗しました：${error.message}`);
+        return;
+      }
+    }
+  }
+
   const { error } = await supabaseClient.from('members').delete().eq('id', memberId);
   if (error) {
     alert(error.message);
