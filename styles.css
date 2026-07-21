@@ -1863,48 +1863,85 @@ body.top-active .top-hero-stat.clickable:hover {
   font-weight: 600;
 }
 
+/* Googleカレンダーの月表示を参考に、マス目いっぱいに敷き詰めたグリッド線
+   スタイルにする。前後の月の日付も薄く表示し、常に6週分（42マス）を
+   均等幅で埋めるのでスクロールが発生しない */
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
-  max-width: 420px;
-  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .calendar-weekday {
   text-align: center;
-  font-size: 0.8em;
-  font-weight: 600;
+  font-size: 0.78em;
+  font-weight: 700;
   color: var(--main-2);
-  padding-bottom: 2px;
+  padding: 8px 0 6px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
 }
 
 .calendar-cell {
+  /* ボタン要素の既定スタイル（width:fit-content等）を全て外し、グリッドの
+     マス目いっぱいに広がる単純な箱として振る舞わせる。この既定のwidthが
+     残っていると、7列均等（1fr）のグリッド幅を無視して自分の中身の幅
+     （数字1〜2文字分）でしか広がらず、結果としてマス目が本来より
+     狭くなり右端がはみ出してヨコにスクロールしてしまう不具合があった */
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   aspect-ratio: 1;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
   color: var(--text);
   font-size: 0.9em;
-  cursor: pointer;
+}
+
+.calendar-grid .calendar-cell:nth-child(7n) {
+  border-right: none;
+}
+
+.calendar-cell:hover {
+  background: var(--main-light);
 }
 
 .calendar-cell:focus-visible {
   outline: 2px solid var(--main);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 
-.calendar-cell.empty {
-  border-color: transparent;
-  background: transparent;
-  cursor: default;
+.calendar-cell.outside .calendar-cell-num {
+  color: var(--muted);
+  font-weight: 400;
 }
 
-.calendar-cell.selected {
+.calendar-cell-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-weight: 600;
+}
+
+.calendar-cell.today .calendar-cell-num {
+  border: 2px solid var(--main);
+  color: var(--main);
+}
+
+.calendar-cell.selected .calendar-cell-num {
   background: var(--main);
   border-color: var(--main);
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .poll-suggestions {

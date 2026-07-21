@@ -3297,6 +3297,27 @@ function renderPollFormStep() {
   else renderPollFormTimeGrid();
 }
 
+function isoDateFromParts(year, monthIndex, day) {
+  const d = new Date(year, monthIndex, day);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getTodayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function renderPollFormCalendarCell(iso, day, outside, todayIso) {
+  const selected = pollFormSelectedDates.has(iso);
+  const classes = ['calendar-cell'];
+  if (outside) classes.push('outside');
+  if (iso === todayIso) classes.push('today');
+  if (selected) classes.push('selected');
+  return `<button type="button" class="${classes.join(' ')}" data-calendar-date="${escapeAttr(iso)}" aria-pressed="${selected}"><span class="calendar-cell-num">${day}</span></button>`;
+}
+
+// Googleカレンダーのように、前後の月の日付も薄く表示して常に6週（42マス）を
+// 埋める（月によってマス目の行数が変わらず、レイアウトが安定する）
 function renderPollFormCalendar() {
   const wrap = document.getElementById('pollFormCalendarWrap');
   if (!wrap) return;
@@ -3306,12 +3327,22 @@ function renderPollFormCalendar() {
 
   const startWeekday = new Date(year, mon, 1).getDay();
   const daysInMonth = new Date(year, mon + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, mon, 0).getDate();
+  const todayIso = getTodayIso();
+  const totalCells = 42;
+
   const cells = [];
-  for (let i = 0; i < startWeekday; i++) cells.push('<div class="calendar-cell empty" aria-hidden="true"></div>');
-  for (let d = 1; d <= daysInMonth; d++) {
-    const iso = `${year}-${String(mon + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const selected = pollFormSelectedDates.has(iso);
-    cells.push(`<button type="button" class="calendar-cell ${selected ? 'selected' : ''}" data-calendar-date="${escapeAttr(iso)}" aria-pressed="${selected}">${d}</button>`);
+  for (let i = 0; i < startWeekday; i++) {
+    const day = daysInPrevMonth - startWeekday + 1 + i;
+    cells.push(renderPollFormCalendarCell(isoDateFromParts(year, mon - 1, day), day, true, todayIso));
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    cells.push(renderPollFormCalendarCell(isoDateFromParts(year, mon, day), day, false, todayIso));
+  }
+  let nextDay = 1;
+  while (cells.length < totalCells) {
+    cells.push(renderPollFormCalendarCell(isoDateFromParts(year, mon + 1, nextDay), nextDay, true, todayIso));
+    nextDay++;
   }
 
   wrap.innerHTML = `
@@ -3336,6 +3367,11 @@ function handlePollFormCalendarClick(domEvent) {
   const iso = cell.dataset.calendarDate;
   if (pollFormSelectedDates.has(iso)) pollFormSelectedDates.delete(iso);
   else pollFormSelectedDates.add(iso);
+  // 前後の月のマスをタップした場合は、Googleカレンダーのようにその月へ移動する
+  if (cell.classList.contains('outside')) {
+    const d = parseDate(iso);
+    pollFormCalendarMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+  }
   renderPollFormCalendar();
 }
 
