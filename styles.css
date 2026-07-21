@@ -1762,6 +1762,17 @@ body.top-active .top-hero-stat.clickable:hover {
   align-items: flex-start;
   justify-content: flex-end;
   white-space: nowrap;
+  /* 横にスライドして日付列を見ても、時刻ラベルが画面に残り続けるように */
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
+/* 見出し行の左上（時刻ラベル列とタイトル行が交差するマス）は、縦横どちらに
+   スライドしても常に画面上に残る必要があるため、他のセルより前面に出す */
+.poll-row-head .poll-time-label {
+  z-index: 2;
 }
 
 .poll-hour-block {
