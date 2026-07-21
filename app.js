@@ -43,7 +43,8 @@ let currentPollSlots = [];
 let currentPollNotes = [];
 let pollMode = 'input';
 let pollInputArmed = false;
-let pollWeekOffset = 0;
+let pollPageOffset = 0;
+const POLL_DAYS_PER_PAGE = 7;
 let pollDrag = null;
 let pollViewInitialized = false;
 let pollRefreshTimer = null;
@@ -2667,19 +2668,34 @@ function isSafeHttpUrl(value) {
 // 重なりが多い時間帯・日を自動で提案する。
 // ==========================================================================
 
-function normalizePoll(row) {
+function normalizePoll(row, days) {
+  const sortedDays = (days || []).slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return {
     pollId: row.id,
     title: row.title,
     note: row.note || '',
-    periodStart: normalizeDate(row.period_start),
-    periodEnd: normalizeDate(row.period_end),
-    dayStartMinutes: Number.isFinite(row.day_start_minutes) ? row.day_start_minutes : 540,
-    dayEndMinutes: Number.isFinite(row.day_end_minutes) ? row.day_end_minutes : 1320,
+    days: sortedDays,
     slotMinutes: Number.isFinite(row.slot_minutes) ? row.slot_minutes : 30,
     publicState: row.public_state || '公開',
     answerToken: row.answer_token || '',
     createdAt: row.created_at || ''
+  };
+}
+
+// 候補日リストの表示用まとめ文字列（2〜3件までは列挙、それより多い場合は省略）
+function formatPollDaysSummary(poll) {
+  if (!poll.days.length) return '-';
+  if (poll.days.length <= 3) return poll.days.map(d => formatDate(d.date)).join('・');
+  return `${formatDate(poll.days[0].date)}〜${formatDate(poll.days[poll.days.length - 1].date)}（他${poll.days.length - 2}日）`;
+}
+
+// 全候補日をまたいだ共通の時間軸（グリッドの行）を出すため、
+// 最も早い開始〜最も遅い終了の範囲を返す
+function getPollTimeRange(poll) {
+  if (!poll.days.length) return { start: 540, end: 1320 };
+  return {
+    start: Math.min(...poll.days.map(d => d.startMinutes)),
+    end: Math.max(...poll.days.map(d => d.endMinutes))
   };
 }
 
@@ -2691,7 +2707,7 @@ function createPollScheduleUrl(token) {
 function createPollShareText(poll) {
   return [
     `${poll.title || ''}`,
-    `期間：${formatDate(poll.periodStart) || '-'} 〜 ${formatDate(poll.periodEnd) || '-'}`,
+    `対象日：${formatPollDaysSummary(poll)}`,
     `日程アンケートリンク：${createPollScheduleUrl(poll.answerToken)}`
   ].join('\n');
 }
@@ -2722,7 +2738,14 @@ async function openPollByToken(token) {
 async function loadAvailabilityPolls() {
   const { data, error } = await supabaseClient.from('availability_polls').select('*').order('period_start', { ascending: false });
   if (error) return;
-  availabilityPolls = (data || []).map(normalizePoll);
+  const { data: dayRows } = await supabaseClient.from('availability_poll_days').select('*');
+  const daysByPoll = new Map();
+  (dayRows || []).forEach(row => {
+    const list = daysByPoll.get(row.poll_id) || [];
+    list.push({ date: normalizeDate(row.slot_date), startMinutes: row.start_minutes, endMinutes: row.end_minutes });
+    daysByPoll.set(row.poll_id, list);
+  });
+  availabilityPolls = (data || []).map(row => normalizePoll(row, daysByPoll.get(row.id) || []));
   renderPollSelect();
   if (isAdmin()) renderAdminPolls();
 }
@@ -2733,7 +2756,7 @@ function renderPollSelect() {
   const visible = availabilityPolls.filter(poll => poll.publicState !== '削除');
   const previous = select.value;
   select.innerHTML = '<option value="">日程アンケートを選択してください</option>' +
-    visible.map(poll => `<option value="${escapeAttr(poll.pollId)}">${escapeHtml(poll.title)}（${escapeHtml(formatDate(poll.periodStart))}〜${escapeHtml(formatDate(poll.periodEnd))}）</option>`).join('');
+    visible.map(poll => `<option value="${escapeAttr(poll.pollId)}">${escapeHtml(poll.title)}（${escapeHtml(formatPollDaysSummary(poll))}）</option>`).join('');
   if (visible.some(poll => poll.pollId === previous)) {
     select.value = previous;
   } else if (currentPoll) {
@@ -2761,7 +2784,7 @@ async function onPollSelectChange() {
   document.getElementById('pollStatus').textContent = '';
   document.getElementById('pollBox').classList.remove('hidden');
   document.getElementById('pollNote').textContent = currentPoll.note || '';
-  pollWeekOffset = 0;
+  pollPageOffset = 0;
   pollMode = 'input';
   pollInputArmed = false;
   pollActingMemberId = '';
@@ -2857,10 +2880,6 @@ async function resetPollSelection() {
   updatePollPendingIndicator();
 }
 
-function toIsoDate(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 function timeToMinutes(value) {
   const parts = String(value || '0:0').split(':').map(Number);
   return (parts[0] || 0) * 60 + (parts[1] || 0);
@@ -2873,46 +2892,35 @@ function minutesToLabel(minutes) {
 }
 
 function getPollSlotStarts(poll) {
+  const { start, end } = getPollTimeRange(poll);
   const starts = [];
-  for (let m = poll.dayStartMinutes; m < poll.dayEndMinutes; m += poll.slotMinutes) starts.push(m);
+  for (let m = start; m < end; m += poll.slotMinutes) starts.push(m);
   return starts;
 }
 
 // グリッドの行は1時間単位。1時間未満の刻み（15分/30分）はその行の中で
 // 縦に並ぶ色分けブロックとして表現し、時刻ラベルは行の境界（1時間ごと）にだけ置く。
 function getPollHourStarts(poll) {
+  const { start, end } = getPollTimeRange(poll);
   const starts = [];
-  const firstHour = Math.floor(poll.dayStartMinutes / 60) * 60;
-  for (let h = firstHour; h < poll.dayEndMinutes; h += 60) starts.push(h);
+  const firstHour = Math.floor(start / 60) * 60;
+  for (let h = firstHour; h < end; h += 60) starts.push(h);
   return starts;
 }
 
-function getPollWeekDates(poll, weekOffset) {
-  const start = parseDate(poll.periodStart);
-  const end = parseDate(poll.periodEnd);
-  if (!start || !end) return [];
-  const weekStart = new Date(start);
-  weekStart.setDate(weekStart.getDate() + weekOffset * 7);
-  const dates = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + i);
-    if (d < start || d > end) continue;
-    dates.push(d);
-  }
-  return dates;
+// 候補日は連続した期間とは限らないため「週」ではなく、候補日リストを
+// 一定件数ずつのページに区切って表示する
+function getPollPageDays(poll, pageOffset) {
+  const from = pageOffset * POLL_DAYS_PER_PAGE;
+  return poll.days.slice(from, from + POLL_DAYS_PER_PAGE);
 }
 
-function movePollWeek(delta) {
+function movePollPage(delta) {
   if (!currentPoll) return;
-  const newOffset = pollWeekOffset + delta;
+  const newOffset = pollPageOffset + delta;
   if (newOffset < 0) return;
-  const start = parseDate(currentPoll.periodStart);
-  const end = parseDate(currentPoll.periodEnd);
-  const candidateStart = new Date(start);
-  candidateStart.setDate(candidateStart.getDate() + newOffset * 7);
-  if (candidateStart > end) return;
-  pollWeekOffset = newOffset;
+  if (newOffset * POLL_DAYS_PER_PAGE >= currentPoll.days.length) return;
+  pollPageOffset = newOffset;
   renderPollView();
 }
 
@@ -2943,21 +2951,19 @@ function renderPollView() {
   const noteField = document.getElementById('pollNoteInputField');
   if (noteField && document.activeElement !== noteField) noteField.value = actingNote ? actingNote.note : '';
 
-  const dates = getPollWeekDates(currentPoll, pollWeekOffset);
+  const days = getPollPageDays(currentPoll, pollPageOffset);
   const navButtons = document.querySelectorAll('.poll-week-nav button');
-  const start = parseDate(currentPoll.periodStart);
-  const end = parseDate(currentPoll.periodEnd);
-  const nextWeekStart = new Date(start);
-  nextWeekStart.setDate(nextWeekStart.getDate() + (pollWeekOffset + 1) * 7);
-  if (navButtons[0]) navButtons[0].disabled = pollWeekOffset <= 0;
-  if (navButtons[1]) navButtons[1].disabled = nextWeekStart > end;
+  if (navButtons[0]) navButtons[0].disabled = pollPageOffset <= 0;
+  if (navButtons[1]) navButtons[1].disabled = (pollPageOffset + 1) * POLL_DAYS_PER_PAGE >= currentPoll.days.length;
 
-  if (!dates.length) {
+  if (!days.length) {
     document.getElementById('pollWeekLabel').textContent = '';
-    document.getElementById('pollGridWrap').innerHTML = '<p class="muted">表示できる日付がありません。</p>';
+    document.getElementById('pollGridWrap').innerHTML = '<p class="muted">表示できる候補日がありません。</p>';
     return;
   }
-  document.getElementById('pollWeekLabel').textContent = `${formatDate(toIsoDate(dates[0]))} 〜 ${formatDate(toIsoDate(dates[dates.length - 1]))}`;
+  document.getElementById('pollWeekLabel').textContent = currentPoll.days.length > POLL_DAYS_PER_PAGE
+    ? `${formatDate(days[0].date)} 〜 ${formatDate(days[days.length - 1].date)}（全${currentPoll.days.length}日中）`
+    : '';
 
   const starts = getPollSlotStarts(currentPoll);
   const myMemberId = actingMemberId;
@@ -2987,7 +2993,8 @@ function renderPollView() {
     else mySelectedKeys.delete(key);
   });
 
-  const headerCells = dates.map(d => {
+  const headerCells = days.map(day => {
+    const d = parseDate(day.date);
     const label = `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
     return `<div class="poll-col-head">${escapeHtml(label)}</div>`;
   }).join('');
@@ -2996,9 +3003,14 @@ function renderPollView() {
   const rows = hourStarts.map(hourStart => {
     const timeLabel = minutesToLabel(hourStart);
     const subStarts = starts.filter(start => start >= hourStart && start < hourStart + 60);
-    const cells = dates.map(d => {
-      const iso = toIsoDate(d);
+    const cells = days.map(day => {
+      const iso = day.date;
+      const d = parseDate(day.date);
       const subCells = subStarts.map(start => {
+        // その候補日で設定した時間帯の外側は選択できないマスとして扱う
+        if (start < day.startMinutes || start >= day.endMinutes) {
+          return '<div class="poll-cell unavailable" aria-hidden="true"></div>';
+        }
         const key = `${iso}_${start}`;
         if (pollMode === 'input') {
           const selected = mySelectedKeys.has(key);
@@ -3017,7 +3029,7 @@ function renderPollView() {
   }).join('');
 
   document.getElementById('pollGridWrap').innerHTML = `
-    <div class="poll-grid" style="--poll-cols:${dates.length}">
+    <div class="poll-grid" style="--poll-cols:${days.length}">
       <div class="poll-row poll-row-head"><div class="poll-time-label"></div>${headerCells}</div>
       ${rows}
     </div>
@@ -3258,38 +3270,77 @@ async function commitPendingPollChanges() {
   updatePollPendingIndicator();
 }
 
+// 候補日の行を1つ追加する。dayを渡すと既存データで埋める（編集フォーム用）、
+// 省略すると空欄＋既定の時間帯（9:00〜22:00）で追加する（新規追加用）。
+function addPollDayRow(day) {
+  const wrap = document.getElementById('pollDayRows');
+  if (!wrap) return;
+  const row = document.createElement('div');
+  row.className = 'poll-day-row';
+  row.innerHTML = `
+    <input type="date" data-day-date value="${day ? escapeAttr(day.date) : ''}">
+    <input type="time" data-day-start value="${escapeAttr(day ? minutesToLabel(day.startMinutes) : '09:00')}">
+    <span class="poll-day-sep">〜</span>
+    <input type="time" data-day-end value="${escapeAttr(day ? minutesToLabel(day.endMinutes) : '22:00')}">
+    <button type="button" class="danger" onclick="removePollDayRow(this)">削除</button>
+  `;
+  wrap.appendChild(row);
+}
+
+function removePollDayRow(buttonEl) {
+  const wrap = document.getElementById('pollDayRows');
+  if (wrap && wrap.children.length <= 1) return;
+  buttonEl.closest('.poll-day-row').remove();
+}
+
+function readPollDayRows() {
+  return Array.from(document.querySelectorAll('#pollDayRows .poll-day-row')).map(row => ({
+    date: row.querySelector('[data-day-date]').value,
+    startMinutes: timeToMinutes(row.querySelector('[data-day-start]').value || '09:00'),
+    endMinutes: timeToMinutes(row.querySelector('[data-day-end]').value || '22:00')
+  }));
+}
+
 async function savePollForm() {
   if (!isAdmin()) return;
   const isEdit = Boolean(document.getElementById('pollId').value);
   const pollId = document.getElementById('pollId').value || crypto.randomUUID();
   const title = document.getElementById('pollTitle').value.trim();
-  const periodStart = document.getElementById('pollPeriodStart').value;
-  const periodEnd = document.getElementById('pollPeriodEnd').value;
+  const days = readPollDayRows().filter(day => day.date);
 
-  if (!title || !periodStart || !periodEnd) {
-    showMessage('pollFormMessage', 'タイトル・期間開始・期間終了は必須です。', false);
+  if (!title) {
+    showMessage('pollFormMessage', 'タイトルは必須です。', false);
     return;
   }
-  if (periodEnd < periodStart) {
-    showMessage('pollFormMessage', '期間終了は期間開始以降にしてください。', false);
+  if (!days.length) {
+    showMessage('pollFormMessage', '候補日を1つ以上追加してください。', false);
     return;
   }
 
-  const dayStartMinutes = timeToMinutes(document.getElementById('pollDayStart').value || '09:00');
-  const dayEndMinutes = timeToMinutes(document.getElementById('pollDayEnd').value || '22:00');
-  if (dayEndMinutes <= dayStartMinutes) {
-    showMessage('pollFormMessage', '1日の終了時刻は開始時刻より後にしてください。', false);
-    return;
+  const seenDates = new Set();
+  for (const day of days) {
+    if (seenDates.has(day.date)) {
+      showMessage('pollFormMessage', `${formatDate(day.date)}が重複しています。`, false);
+      return;
+    }
+    seenDates.add(day.date);
+    if (day.endMinutes <= day.startMinutes) {
+      showMessage('pollFormMessage', `${formatDate(day.date)}の終了時刻は開始時刻より後にしてください。`, false);
+      return;
+    }
   }
+  days.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   const payload = {
     id: pollId,
     title,
     note: document.getElementById('pollNoteInput').value.trim(),
-    period_start: periodStart,
-    period_end: periodEnd,
-    day_start_minutes: dayStartMinutes,
-    day_end_minutes: dayEndMinutes,
+    // period_start/period_end/day_start_minutes/day_end_minutesは一覧のソート等に
+    // 使う補助情報として、候補日から算出したmin/maxを引き続き保存する
+    period_start: days[0].date,
+    period_end: days[days.length - 1].date,
+    day_start_minutes: Math.min(...days.map(d => d.startMinutes)),
+    day_end_minutes: Math.max(...days.map(d => d.endMinutes)),
     slot_minutes: Number(document.getElementById('pollSlotMinutes').value),
     updated_at: new Date().toISOString()
   };
@@ -3297,9 +3348,19 @@ async function savePollForm() {
   const button = document.getElementById('savePollButton');
   const restore = setButtonBusy(button, '保存中...');
   const { error } = await supabaseClient.from('availability_polls').upsert(payload);
-  restore();
   if (error) {
+    restore();
     showMessage('pollFormMessage', error.message, false);
+    return;
+  }
+
+  await supabaseClient.from('availability_poll_days').delete().eq('poll_id', pollId);
+  const { error: daysError } = await supabaseClient.from('availability_poll_days').insert(
+    days.map(day => ({ poll_id: pollId, slot_date: day.date, start_minutes: day.startMinutes, end_minutes: day.endMinutes }))
+  );
+  restore();
+  if (daysError) {
+    showMessage('pollFormMessage', daysError.message, false);
     return;
   }
 
@@ -3312,12 +3373,10 @@ async function savePollForm() {
 function clearPollForm() {
   document.getElementById('pollId').value = '';
   document.getElementById('pollTitle').value = '';
-  document.getElementById('pollPeriodStart').value = '';
-  document.getElementById('pollPeriodEnd').value = '';
-  document.getElementById('pollDayStart').value = '09:00';
-  document.getElementById('pollDayEnd').value = '22:00';
   document.getElementById('pollSlotMinutes').value = '30';
   document.getElementById('pollNoteInput').value = '';
+  document.getElementById('pollDayRows').innerHTML = '';
+  addPollDayRow();
 }
 
 function editPollForm(pollId) {
@@ -3326,12 +3385,10 @@ function editPollForm(pollId) {
   switchAdminTab('polls');
   document.getElementById('pollId').value = poll.pollId;
   document.getElementById('pollTitle').value = poll.title;
-  document.getElementById('pollPeriodStart').value = poll.periodStart;
-  document.getElementById('pollPeriodEnd').value = poll.periodEnd;
-  document.getElementById('pollDayStart').value = minutesToLabel(poll.dayStartMinutes);
-  document.getElementById('pollDayEnd').value = minutesToLabel(poll.dayEndMinutes);
   document.getElementById('pollSlotMinutes').value = String(poll.slotMinutes);
   document.getElementById('pollNoteInput').value = poll.note || '';
+  document.getElementById('pollDayRows').innerHTML = '';
+  (poll.days.length ? poll.days : [null]).forEach(day => addPollDayRow(day));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -3364,7 +3421,7 @@ function renderAdminPolls() {
     <tr>
       <td data-label="状態">${escapeHtml(poll.publicState === '削除' ? '削除済み' : '公開')}</td>
       <td data-label="タイトル">${escapeHtml(poll.title)}</td>
-      <td data-label="期間">${escapeHtml(formatDate(poll.periodStart))}〜${escapeHtml(formatDate(poll.periodEnd))}</td>
+      <td data-label="候補日">${escapeHtml(formatPollDaysSummary(poll))}</td>
       <td class="wrap" data-label="共有リンク"><div class="share-actions"><a href="${escapeAttr(createPollScheduleUrl(poll.answerToken))}" target="_blank" rel="noopener noreferrer">日程アンケートリンク</a><button type="button" data-copy-poll-share="${escapeAttr(poll.pollId)}">共有文コピー</button></div></td>
       <td data-label="操作">
         <button type="button" data-edit-poll="${escapeAttr(poll.pollId)}">編集</button>
@@ -3374,7 +3431,7 @@ function renderAdminPolls() {
       </td>
     </tr>
   `).join('');
-  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>タイトル</th><th>期間</th><th>共有リンク</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="5">日程アンケートがありません。</td></tr>'}</tbody></table></div>`;
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>タイトル</th><th>候補日</th><th>共有リンク</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="5">日程アンケートがありません。</td></tr>'}</tbody></table></div>`;
 }
 
 function handleAdminPollsClick(domEvent) {

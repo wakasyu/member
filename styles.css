@@ -1812,6 +1812,52 @@ body.top-active .top-hero-stat.clickable:hover {
   touch-action: pan-x pan-y;
 }
 
+/* その候補日には設定されていない時間帯（他の日は時間が違う場合の空白マス）。
+   選択不可なのでロック中とは見た目を変え、罫線だけ残して背景を消す */
+.poll-cell.unavailable {
+  cursor: default;
+  background: transparent;
+  border-right-color: transparent;
+  touch-action: pan-x pan-y;
+}
+
+.poll-day-rows-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 0 8px;
+}
+
+.poll-day-rows-head h3 {
+  margin: 0;
+}
+
+.poll-day-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.poll-day-row:first-child {
+  border-top: 1px solid var(--border);
+}
+
+.poll-day-sep {
+  color: var(--main-2);
+}
+
+.poll-day-row input[type="date"] {
+  min-width: 150px;
+}
+
+.poll-day-row input[type="time"] {
+  min-width: 110px;
+}
+
 .poll-suggestions {
   margin-top: 16px;
   display: grid;

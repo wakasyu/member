@@ -272,9 +272,9 @@
               <button id="pollModeResultButton" type="button" class="poll-mode-button" onclick="setPollMode('result')">みんなの結果を見る</button>
             </div>
             <div class="poll-week-nav">
-              <button type="button" onclick="movePollWeek(-1)">◀ 前の週</button>
+              <button type="button" onclick="movePollPage(-1)">◀ 前へ</button>
               <span id="pollWeekLabel" class="muted"></span>
-              <button type="button" onclick="movePollWeek(1)">次の週 ▶</button>
+              <button type="button" onclick="movePollPage(1)">次へ ▶</button>
             </div>
           </div>
           <div id="pollInputControls">
@@ -443,19 +443,28 @@
 
       <section class="panel admin-section" data-admin-section="polls">
         <h2>日程アンケートの作成・管理</h2>
-        <p class="muted">期間と1日の時間帯を決めて作成すると、メンバーは「日程アンケート」タブで空き時間を申告できるようになります。</p>
+        <p class="muted">候補日を1日ずつ追加し、それぞれの日の時間帯を決めて作成すると、メンバーは「日程アンケート」タブで空き時間を申告できるようになります。候補日は連続していなくても構いません。</p>
         <input id="pollId" type="hidden">
         <div class="grid3">
           <label>タイトル<input id="pollTitle" type="text" placeholder="例：9月の演奏依頼の日程調整"></label>
-          <label>期間開始<input id="pollPeriodStart" type="date"></label>
-          <label>期間終了<input id="pollPeriodEnd" type="date"></label>
-          <label>1日の開始時刻<input id="pollDayStart" type="time" value="09:00"></label>
-          <label>1日の終了時刻<input id="pollDayEnd" type="time" value="22:00"></label>
           <label>時間の単位<select id="pollSlotMinutes">
             <option value="15">15分</option>
             <option value="30" selected>30分</option>
             <option value="60">60分</option>
           </select></label>
+        </div>
+        <div class="poll-day-rows-head">
+          <h3>候補日</h3>
+          <button type="button" onclick="addPollDayRow()">＋候補日を追加</button>
+        </div>
+        <div id="pollDayRows">
+          <div class="poll-day-row">
+            <input type="date" data-day-date>
+            <input type="time" data-day-start value="09:00">
+            <span class="poll-day-sep">〜</span>
+            <input type="time" data-day-end value="22:00">
+            <button type="button" class="danger" onclick="removePollDayRow(this)">削除</button>
+          </div>
         </div>
         <label class="wide-field">備考<textarea id="pollNoteInput"></textarea></label>
         <div class="button-row">

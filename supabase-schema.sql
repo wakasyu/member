@@ -198,6 +198,10 @@ create table if not exists public.events (
 -- 対象メンバー全員が回答し終わった時の「完了メール」を二重送信しないための記録用
 alter table public.events add column if not exists completion_notified_at timestamptz null;
 
+-- 回答期限の前日リマインドメール（deadline-reminder Edge Function、pg_cronで毎日起動）を
+-- 二重送信しないための記録用
+alter table public.events add column if not exists reminder_sent_at timestamptz null;
+
 -- 対象メンバーを在籍期間による自動判定ではなく、その予定だけ手動で絞り込みたい場合に使う
 -- （例：入会者面談は特定の数人だけが対象）。この予定にレコードが1件でもあれば、
 -- 自動判定の代わりにここに登録されたメンバーだけを対象として扱う。
@@ -351,6 +355,31 @@ create table if not exists public.availability_notes (
   note text not null default '',
   updated_at timestamptz not null default now(),
   unique (poll_id, member_id)
+);
+
+-- 日程アンケートの「候補日」1件ごとの日付と、その日だけの時間帯。
+-- period_start〜period_endの連続期間＋1日共通の時間帯という旧モデルの代わりに、
+-- 飛び石の日付をそれぞれ個別の時間帯で登録できるようにするためのテーブル。
+-- availability_polls.period_start/period_end/day_start_minutes/day_end_minutesは
+-- 一覧のソート用に候補日から算出したmin/maxを引き続き保存するが、
+-- グリッド描画・入力可否の判定はすべてこのテーブルを見て行う。
+create table if not exists public.availability_poll_days (
+  id uuid primary key default gen_random_uuid(),
+  poll_id uuid not null references public.availability_polls(id) on delete cascade,
+  slot_date date not null,
+  start_minutes integer not null,
+  end_minutes integer not null,
+  unique (poll_id, slot_date)
+);
+
+-- 既存の日程アンケート（期間＋共通時間帯モデル）を候補日リストへ1回だけ移行する。
+-- すでに候補日が1件でも登録済みのアンケートは対象外（新モデルへの移行済みとみなす）。
+insert into public.availability_poll_days (poll_id, slot_date, start_minutes, end_minutes)
+select p.id, d::date, p.day_start_minutes, p.day_end_minutes
+from public.availability_polls p
+cross join lateral generate_series(p.period_start, p.period_end, interval '1 day') as d
+where not exists (
+  select 1 from public.availability_poll_days x where x.poll_id = p.id
 );
 
 -- 新規メンバー登録リンク用のトークン。既存メンバー行とは紐づかない
@@ -673,6 +702,21 @@ with check (
   or member_id = (select member_id from public.profiles where id = auth.uid())
 );
 
+alter table public.availability_poll_days enable row level security;
+
+drop policy if exists "availability_poll_days read authenticated" on public.availability_poll_days;
+create policy "availability_poll_days read authenticated"
+on public.availability_poll_days for select
+to authenticated
+using (true);
+
+drop policy if exists "availability_poll_days write admin" on public.availability_poll_days;
+create policy "availability_poll_days write admin"
+on public.availability_poll_days for all
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
+
 -- 招待トークンの発行・一覧確認は管理者のみ。実際にトークンを検証して
 -- メンバー行を作るのはEdge Function（service_role、RLSをbypass）なので
 -- ここに一般メンバー・匿名向けのポリシーは不要。
@@ -704,6 +748,12 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'availability_notes'
   ) then
     alter publication supabase_realtime add table public.availability_notes;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'availability_poll_days'
+  ) then
+    alter publication supabase_realtime add table public.availability_poll_days;
   end if;
 end;
 $$;
@@ -798,4 +848,32 @@ $$;
 --   '{"Content-type":"application/json","x-webhook-secret":"YOUR_WEBHOOK_SECRET"}',
 --   '{}',
 --   '5000'
+-- );
+
+-- 回答期限の前日リマインドメール（未回答者がいる予定を管理者へ通知）を
+-- 有効にする場合だけ実行：
+-- （Database Webhookのような行の変更トリガーではなく、日付ベースで毎日1回
+-- 起動する必要があるため、行変更トリガーではなくpg_cronで時刻起動する）
+-- 1. supabase/functions/deadline-reminder を
+--    `supabase functions deploy deadline-reminder --no-verify-jwt` でデプロイする
+--    （--no-verify-jwtにする理由はnotify-answerと同じで、呼び出し元が
+--    ユーザーではなくpg_cronのため。認可は下のx-webhook-secretで行う）
+-- 2. `supabase secrets set DEADLINE_REMINDER_SECRET=...` を設定する
+--    （RESEND_API_KEY/ADMIN_NOTIFY_EMAIL/NOTIFY_FROM_EMAILはnotify-answerと
+--    共用。送信先は管理者（ADMIN_NOTIFY_EMAIL）のみなのでGmail SMTPは不要）
+-- 3. 下のSQLの YOUR_PROJECT_REF と YOUR_DEADLINE_REMINDER_SECRET を実際の値に
+--    置き換えて実行する（毎日23:00 UTC = 8:00 JSTに起動する設定）
+--
+-- create extension if not exists pg_cron;
+--
+-- select cron.schedule(
+--   'deadline-reminder-daily',
+--   '0 23 * * *',
+--   $$
+--   select net.http_post(
+--     url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/deadline-reminder',
+--     headers := jsonb_build_object('Content-Type', 'application/json', 'x-webhook-secret', 'YOUR_DEADLINE_REMINDER_SECRET'),
+--     body := '{}'::jsonb
+--   );
+--   $$
 -- );
