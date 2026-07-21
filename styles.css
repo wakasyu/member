@@ -1874,6 +1874,15 @@ body.top-active .top-hero-stat.clickable:hover {
   overflow: hidden;
 }
 
+/* スマホ幅ではGoogleカレンダーのように画面いっぱいに広げるが、PC幅では
+   そのまま伸ばすとマス目が大きくなりすぎるため、幅（＝aspect-ratio:1で
+   連動する高さも）を半分に縮める */
+@media (min-width: 701px) {
+  .calendar-grid {
+    max-width: 50%;
+  }
+}
+
 .calendar-weekday {
   text-align: center;
   font-size: 0.78em;
