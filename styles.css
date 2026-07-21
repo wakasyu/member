@@ -1717,7 +1717,14 @@ body.top-active .top-hero-stat.clickable:hover {
 }
 
 .poll-grid-wrap {
-  overflow-x: auto;
+  /* overflow-xだけをautoにすると仕様上overflow-yも自動的にautoへ変換されるが、
+     この要素の高さはコンテンツに合わせて伸びるだけで自身はスクロールしない
+     ため、position:stickyの基準（＝最も近いスクロールコンテナ）としては
+     機能しない（内部でスクロールが起きないので固定されて見えない）。
+     縦にも実際にスクロールするコンテナにすることで、見出し行・時刻ラベルの
+     stickyを正しく機能させる */
+  overflow: auto;
+  max-height: 60vh;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -1733,6 +1740,9 @@ body.top-active .top-hero-stat.clickable:hover {
   grid-template-columns: 56px repeat(var(--poll-cols), minmax(56px, 1fr));
   align-items: start;
   border-top: 2px solid var(--main-border);
+  /* 行ごとに独立したスタッキングコンテキストを作り、他の行のセルの色が
+     stickyな時刻ラベル・見出し行の下から透けて見えることが無いようにする */
+  isolation: isolate;
 }
 
 .poll-row-head {
