@@ -443,29 +443,42 @@
 
       <section class="panel admin-section" data-admin-section="polls">
         <h2>日程アンケートの作成・管理</h2>
-        <p class="muted">候補日を1日ずつ追加し、それぞれの日の時間帯を決めて作成すると、メンバーは「日程アンケート」タブで空き時間を申告できるようになります。候補日は連続していなくても構いません。</p>
+        <p class="muted">カレンダーから候補日をタップして選び、「完了」を押したら各日の時間帯をスワイプで指定すると、メンバーは「日程アンケート」タブで空き時間を申告できるようになります。候補日は連続していなくても構いません。</p>
         <input id="pollId" type="hidden">
         <div class="grid3">
           <label>タイトル<input id="pollTitle" type="text" placeholder="例：9月の演奏依頼の日程調整"></label>
-          <label>時間の単位<select id="pollSlotMinutes">
+          <label>時間の単位<select id="pollSlotMinutes" onchange="onPollFormSlotMinutesChange()">
             <option value="15">15分</option>
             <option value="30" selected>30分</option>
             <option value="60">60分</option>
           </select></label>
         </div>
-        <div class="poll-day-rows-head">
-          <h3>候補日</h3>
-          <button type="button" onclick="addPollDayRow()">＋候補日を追加</button>
-        </div>
-        <div id="pollDayRows">
-          <div class="poll-day-row">
-            <input type="date" data-day-date>
-            <input type="time" data-day-start value="09:00">
-            <span class="poll-day-sep">〜</span>
-            <input type="time" data-day-end value="22:00">
-            <button type="button" class="danger" onclick="removePollDayRow(this)">削除</button>
+
+        <div id="pollFormDateStep">
+          <div class="poll-day-rows-head">
+            <h3>候補日を選ぶ</h3>
+            <span id="pollFormDateCount" class="muted"></span>
+          </div>
+          <div class="poll-form-calendar-nav">
+            <button type="button" onclick="movePollFormCalendarMonth(-1)">◀</button>
+            <span id="pollFormCalendarLabel"></span>
+            <button type="button" onclick="movePollFormCalendarMonth(1)">▶</button>
+          </div>
+          <div id="pollFormCalendarWrap" onclick="handlePollFormCalendarClick(event)"></div>
+          <div class="button-row">
+            <button type="button" class="primary" onclick="confirmPollFormDates()">完了（時間帯の設定へ）</button>
           </div>
         </div>
+
+        <div id="pollFormTimeStep" class="hidden">
+          <div class="poll-day-rows-head">
+            <h3>各日の時間帯をスワイプで指定</h3>
+            <button type="button" class="link-button" onclick="backToPollFormDates()">◀ 候補日を選び直す</button>
+          </div>
+          <p class="muted">マス目をドラッグ（スマホは指でなぞる）すると、その時間帯を候補に含めたり外したりできます。1つの続いた時間帯として指定してください。</p>
+          <div id="pollFormTimeGridWrap" class="poll-grid-wrap"></div>
+        </div>
+
         <label class="wide-field">備考<textarea id="pollNoteInput"></textarea></label>
         <div class="button-row">
           <button id="savePollButton" class="primary" type="button" onclick="savePollForm()">日程アンケートを保存</button>

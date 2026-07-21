@@ -1833,29 +1833,57 @@ body.top-active .top-hero-stat.clickable:hover {
   margin: 0;
 }
 
-.poll-day-row {
+.poll-form-calendar-nav {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+  justify-content: center;
+  gap: 14px;
+  margin: 4px 0 10px;
+  font-weight: 600;
 }
 
-.poll-day-row:first-child {
-  border-top: 1px solid var(--border);
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  max-width: 420px;
+  margin: 0 auto;
 }
 
-.poll-day-sep {
+.calendar-weekday {
+  text-align: center;
+  font-size: 0.8em;
+  font-weight: 600;
   color: var(--main-2);
+  padding-bottom: 2px;
 }
 
-.poll-day-row input[type="date"] {
-  min-width: 150px;
+.calendar-cell {
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9em;
+  cursor: pointer;
 }
 
-.poll-day-row input[type="time"] {
-  min-width: 110px;
+.calendar-cell:focus-visible {
+  outline: 2px solid var(--main);
+  outline-offset: 1px;
+}
+
+.calendar-cell.empty {
+  border-color: transparent;
+  background: transparent;
+  cursor: default;
+}
+
+.calendar-cell.selected {
+  background: var(--main);
+  border-color: var(--main);
+  color: #fff;
+  font-weight: 600;
 }
 
 .poll-suggestions {

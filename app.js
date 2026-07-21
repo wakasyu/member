@@ -51,6 +51,14 @@ let pollRefreshTimer = null;
 let pollActingMemberId = '';
 let pollPendingChanges = new Map();
 
+// 管理者の日程アンケート作成フォーム：候補日はカレンダーから複数タップで選び、
+// 「完了」を押すと各候補日の時間帯をスワイプで指定するステップに進む
+let pollFormStep = 'dates'; // 'dates' | 'times'
+let pollFormCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let pollFormSelectedDates = new Set();
+let pollFormDayTimes = new Map(); // dateISO -> Set(startMinutes)
+let pollFormDrag = null;
+
 document.addEventListener('DOMContentLoaded', initializeApp);
 
 // 「回答完了」を押す前にページを離れて未保存の回答を失うことがないよう警告する
@@ -104,6 +112,7 @@ async function initializeApp() {
   document.getElementById('passwordResetForm').addEventListener('submit', submitNewPassword);
   document.getElementById('registerForm').addEventListener('submit', submitRegisterForm);
   document.getElementById('staffLoginForm').addEventListener('submit', handleStaffLogin);
+  initPollForm();
 
   // Supabaseのメールリンクの形式（#access_token=...&type=recovery か ?code=...）に
   // 依存せず確実に拾えるよう、URLの文字列チェックに加えてSDK側のイベントでも検知する。
@@ -3272,64 +3281,256 @@ async function commitPendingPollChanges() {
 
 // 候補日の行を1つ追加する。dayを渡すと既存データで埋める（編集フォーム用）、
 // 省略すると空欄＋既定の時間帯（9:00〜22:00）で追加する（新規追加用）。
-function addPollDayRow(day) {
-  const wrap = document.getElementById('pollDayRows');
+// ==== ステップ1：カレンダーから候補日を複数タップで選ぶ ====
+
+function initPollForm() {
+  renderPollFormStep();
+}
+
+function renderPollFormStep() {
+  const dateStep = document.getElementById('pollFormDateStep');
+  const timeStep = document.getElementById('pollFormTimeStep');
+  if (!dateStep || !timeStep) return;
+  dateStep.classList.toggle('hidden', pollFormStep !== 'dates');
+  timeStep.classList.toggle('hidden', pollFormStep !== 'times');
+  if (pollFormStep === 'dates') renderPollFormCalendar();
+  else renderPollFormTimeGrid();
+}
+
+function renderPollFormCalendar() {
+  const wrap = document.getElementById('pollFormCalendarWrap');
   if (!wrap) return;
-  const row = document.createElement('div');
-  row.className = 'poll-day-row';
-  row.innerHTML = `
-    <input type="date" data-day-date value="${day ? escapeAttr(day.date) : ''}">
-    <input type="time" data-day-start value="${escapeAttr(day ? minutesToLabel(day.startMinutes) : '09:00')}">
-    <span class="poll-day-sep">〜</span>
-    <input type="time" data-day-end value="${escapeAttr(day ? minutesToLabel(day.endMinutes) : '22:00')}">
-    <button type="button" class="danger" onclick="removePollDayRow(this)">削除</button>
+  const year = pollFormCalendarMonth.getFullYear();
+  const mon = pollFormCalendarMonth.getMonth();
+  document.getElementById('pollFormCalendarLabel').textContent = `${year}年${mon + 1}月`;
+
+  const startWeekday = new Date(year, mon, 1).getDay();
+  const daysInMonth = new Date(year, mon + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startWeekday; i++) cells.push('<div class="calendar-cell empty" aria-hidden="true"></div>');
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${year}-${String(mon + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const selected = pollFormSelectedDates.has(iso);
+    cells.push(`<button type="button" class="calendar-cell ${selected ? 'selected' : ''}" data-calendar-date="${escapeAttr(iso)}" aria-pressed="${selected}">${d}</button>`);
+  }
+
+  wrap.innerHTML = `
+    <div class="calendar-grid">
+      ${WEEKDAYS.map(w => `<div class="calendar-weekday">${escapeHtml(w)}</div>`).join('')}
+      ${cells.join('')}
+    </div>
   `;
-  wrap.appendChild(row);
+
+  const countLabel = document.getElementById('pollFormDateCount');
+  if (countLabel) countLabel.textContent = pollFormSelectedDates.size ? `${pollFormSelectedDates.size}日選択中` : '';
 }
 
-function removePollDayRow(buttonEl) {
-  const wrap = document.getElementById('pollDayRows');
-  if (wrap && wrap.children.length <= 1) return;
-  buttonEl.closest('.poll-day-row').remove();
+function movePollFormCalendarMonth(delta) {
+  pollFormCalendarMonth = new Date(pollFormCalendarMonth.getFullYear(), pollFormCalendarMonth.getMonth() + delta, 1);
+  renderPollFormCalendar();
 }
 
-function readPollDayRows() {
-  return Array.from(document.querySelectorAll('#pollDayRows .poll-day-row')).map(row => ({
-    date: row.querySelector('[data-day-date]').value,
-    startMinutes: timeToMinutes(row.querySelector('[data-day-start]').value || '09:00'),
-    endMinutes: timeToMinutes(row.querySelector('[data-day-end]').value || '22:00')
-  }));
+function handlePollFormCalendarClick(domEvent) {
+  const cell = domEvent.target.closest('[data-calendar-date]');
+  if (!cell) return;
+  const iso = cell.dataset.calendarDate;
+  if (pollFormSelectedDates.has(iso)) pollFormSelectedDates.delete(iso);
+  else pollFormSelectedDates.add(iso);
+  renderPollFormCalendar();
 }
+
+function confirmPollFormDates() {
+  if (!pollFormSelectedDates.size) {
+    showMessage('pollFormMessage', '候補日を1つ以上選んでください。', false);
+    return;
+  }
+  // 選び直しで外れた日の時間帯データは捨て、新しく選ばれた日は空のまま時間帯ステップへ渡す
+  const kept = new Map();
+  pollFormSelectedDates.forEach(iso => kept.set(iso, pollFormDayTimes.get(iso) || new Set()));
+  pollFormDayTimes = kept;
+  pollFormStep = 'times';
+  showMessage('pollFormMessage', '', true);
+  renderPollFormStep();
+}
+
+function backToPollFormDates() {
+  pollFormStep = 'dates';
+  renderPollFormStep();
+}
+
+// ==== ステップ2：候補日ごとの時間帯をスワイプ（ドラッグ）で指定 ====
+
+function getPollFormSlotStarts() {
+  const slotMinutes = Number(document.getElementById('pollSlotMinutes').value) || 30;
+  const starts = [];
+  for (let m = 0; m < 24 * 60; m += slotMinutes) starts.push(m);
+  return starts;
+}
+
+function onPollFormSlotMinutesChange() {
+  const hasPaint = Array.from(pollFormDayTimes.values()).some(set => set.size);
+  if (hasPaint) {
+    pollFormDayTimes.forEach(set => set.clear());
+    showMessage('pollFormMessage', '時間の単位を変更したため、指定済みの時間帯はリセットされました。もう一度スワイプで指定してください。', false);
+  }
+  if (pollFormStep === 'times') renderPollFormTimeGrid();
+}
+
+function renderPollFormTimeGrid() {
+  const wrap = document.getElementById('pollFormTimeGridWrap');
+  if (!wrap) return;
+  const dates = Array.from(pollFormSelectedDates).sort();
+  const starts = getPollFormSlotStarts();
+
+  const headerCells = dates.map(iso => {
+    const d = parseDate(iso);
+    const label = `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+    return `<div class="poll-col-head">${escapeHtml(label)}</div>`;
+  }).join('');
+
+  const rows = [];
+  for (let hourStart = 0; hourStart < 24 * 60; hourStart += 60) {
+    const timeLabel = minutesToLabel(hourStart);
+    const subStarts = starts.filter(s => s >= hourStart && s < hourStart + 60);
+    const cells = dates.map(iso => {
+      const set = pollFormDayTimes.get(iso) || new Set();
+      const subCells = subStarts.map(start => {
+        const selected = set.has(start);
+        const label = `${escapeAttr(formatDate(iso))} ${minutesToLabel(start)}`;
+        return `<div class="poll-cell ${selected ? 'selected' : ''}" data-pf-date="${escapeAttr(iso)}" data-pf-start="${start}" title="${escapeAttr(minutesToLabel(start))}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="${label}${selected ? '（選択中）' : ''}"></div>`;
+      }).join('');
+      return `<div class="poll-hour-block">${subCells}</div>`;
+    }).join('');
+    rows.push(`<div class="poll-row"><div class="poll-time-label">${timeLabel}</div>${cells}</div>`);
+  }
+
+  wrap.innerHTML = `
+    <div class="poll-grid" style="--poll-cols:${dates.length}">
+      <div class="poll-row poll-row-head"><div class="poll-time-label"></div>${headerCells}</div>
+      ${rows.join('')}
+    </div>
+  `;
+  setupPollFormTimeGridEvents();
+}
+
+function setupPollFormTimeGridEvents() {
+  const wrap = document.getElementById('pollFormTimeGridWrap');
+  if (!wrap || wrap.dataset.bound) return;
+  wrap.dataset.bound = 'true';
+  wrap.addEventListener('mousedown', onPollFormCellDown);
+  wrap.addEventListener('mouseover', onPollFormCellEnter);
+  document.addEventListener('mouseup', onPollFormCellUp);
+  wrap.addEventListener('touchstart', onPollFormCellTouchStart, { passive: false });
+  wrap.addEventListener('touchmove', onPollFormCellTouchMove, { passive: false });
+  wrap.addEventListener('touchend', onPollFormCellUp);
+  wrap.addEventListener('keydown', onPollFormCellKeyDown);
+}
+
+function applyPollFormDragToCell(cell) {
+  if (!cell || !cell.dataset.pfDate) return;
+  const key = `${cell.dataset.pfDate}_${cell.dataset.pfStart}`;
+  if (pollFormDrag.keys.has(key)) return;
+  pollFormDrag.keys.add(key);
+  cell.classList.toggle('selected', pollFormDrag.add);
+}
+
+function onPollFormCellDown(domEvent) {
+  const cell = domEvent.target.closest('.poll-cell');
+  if (!cell || !cell.dataset.pfDate) return;
+  domEvent.preventDefault();
+  pollFormDrag = { add: !cell.classList.contains('selected'), keys: new Set() };
+  applyPollFormDragToCell(cell);
+}
+
+function onPollFormCellEnter(domEvent) {
+  if (!pollFormDrag) return;
+  applyPollFormDragToCell(domEvent.target.closest('.poll-cell'));
+}
+
+function onPollFormCellTouchStart(domEvent) {
+  const touch = domEvent.touches[0];
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const cell = el && el.closest ? el.closest('.poll-cell') : null;
+  if (!cell || !cell.dataset.pfDate) return;
+  domEvent.preventDefault();
+  pollFormDrag = { add: !cell.classList.contains('selected'), keys: new Set() };
+  applyPollFormDragToCell(cell);
+}
+
+function onPollFormCellTouchMove(domEvent) {
+  if (!pollFormDrag) return;
+  domEvent.preventDefault();
+  const touch = domEvent.touches[0];
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  applyPollFormDragToCell(el && el.closest ? el.closest('.poll-cell') : null);
+}
+
+function onPollFormCellUp() {
+  if (!pollFormDrag) return;
+  const drag = pollFormDrag;
+  pollFormDrag = null;
+  if (!drag.keys.size) return;
+  drag.keys.forEach(key => {
+    const sepIndex = key.lastIndexOf('_');
+    const date = key.slice(0, sepIndex);
+    const start = Number(key.slice(sepIndex + 1));
+    const set = pollFormDayTimes.get(date) || new Set();
+    if (drag.add) set.add(start); else set.delete(start);
+    pollFormDayTimes.set(date, set);
+  });
+  renderPollFormTimeGrid();
+}
+
+function onPollFormCellKeyDown(domEvent) {
+  if (domEvent.key !== 'Enter' && domEvent.key !== ' ') return;
+  const cell = domEvent.target.closest('.poll-cell');
+  if (!cell || !cell.dataset.pfDate) return;
+  domEvent.preventDefault();
+  const date = cell.dataset.pfDate;
+  const start = Number(cell.dataset.pfStart);
+  const set = pollFormDayTimes.get(date) || new Set();
+  if (set.has(start)) set.delete(start); else set.add(start);
+  pollFormDayTimes.set(date, set);
+  renderPollFormTimeGrid();
+  const nextCell = document.querySelector(`.poll-cell[data-pf-date="${CSS.escape(date)}"][data-pf-start="${CSS.escape(String(start))}"]`);
+  if (nextCell) nextCell.focus();
+}
+
+// ==== 保存 ====
 
 async function savePollForm() {
   if (!isAdmin()) return;
   const isEdit = Boolean(document.getElementById('pollId').value);
   const pollId = document.getElementById('pollId').value || crypto.randomUUID();
   const title = document.getElementById('pollTitle').value.trim();
-  const days = readPollDayRows().filter(day => day.date);
 
   if (!title) {
     showMessage('pollFormMessage', 'タイトルは必須です。', false);
     return;
   }
-  if (!days.length) {
-    showMessage('pollFormMessage', '候補日を1つ以上追加してください。', false);
+  if (!pollFormSelectedDates.size) {
+    showMessage('pollFormMessage', '候補日を1つ以上選んでください。', false);
     return;
   }
 
-  const seenDates = new Set();
-  for (const day of days) {
-    if (seenDates.has(day.date)) {
-      showMessage('pollFormMessage', `${formatDate(day.date)}が重複しています。`, false);
+  const slotMinutes = Number(document.getElementById('pollSlotMinutes').value);
+  const sortedDates = Array.from(pollFormSelectedDates).sort();
+  const days = [];
+  for (const iso of sortedDates) {
+    const set = pollFormDayTimes.get(iso) || new Set();
+    if (!set.size) {
+      showMessage('pollFormMessage', `${formatDate(iso)}の時間帯をスワイプで指定してください。`, false);
       return;
     }
-    seenDates.add(day.date);
-    if (day.endMinutes <= day.startMinutes) {
-      showMessage('pollFormMessage', `${formatDate(day.date)}の終了時刻は開始時刻より後にしてください。`, false);
-      return;
+    const sortedStarts = Array.from(set).sort((a, b) => a - b);
+    for (let i = 1; i < sortedStarts.length; i++) {
+      if (sortedStarts[i] - sortedStarts[i - 1] !== slotMinutes) {
+        showMessage('pollFormMessage', `${formatDate(iso)}の時間帯が連続していません。1つの続いた時間帯として指定してください。`, false);
+        return;
+      }
     }
+    days.push({ date: iso, startMinutes: sortedStarts[0], endMinutes: sortedStarts[sortedStarts.length - 1] + slotMinutes });
   }
-  days.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   const payload = {
     id: pollId,
@@ -3341,7 +3542,7 @@ async function savePollForm() {
     period_end: days[days.length - 1].date,
     day_start_minutes: Math.min(...days.map(d => d.startMinutes)),
     day_end_minutes: Math.max(...days.map(d => d.endMinutes)),
-    slot_minutes: Number(document.getElementById('pollSlotMinutes').value),
+    slot_minutes: slotMinutes,
     updated_at: new Date().toISOString()
   };
 
@@ -3375,8 +3576,11 @@ function clearPollForm() {
   document.getElementById('pollTitle').value = '';
   document.getElementById('pollSlotMinutes').value = '30';
   document.getElementById('pollNoteInput').value = '';
-  document.getElementById('pollDayRows').innerHTML = '';
-  addPollDayRow();
+  pollFormSelectedDates = new Set();
+  pollFormDayTimes = new Map();
+  pollFormCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  pollFormStep = 'dates';
+  renderPollFormStep();
 }
 
 function editPollForm(pollId) {
@@ -3387,8 +3591,18 @@ function editPollForm(pollId) {
   document.getElementById('pollTitle').value = poll.title;
   document.getElementById('pollSlotMinutes').value = String(poll.slotMinutes);
   document.getElementById('pollNoteInput').value = poll.note || '';
-  document.getElementById('pollDayRows').innerHTML = '';
-  (poll.days.length ? poll.days : [null]).forEach(day => addPollDayRow(day));
+
+  pollFormSelectedDates = new Set(poll.days.map(d => d.date));
+  pollFormDayTimes = new Map();
+  poll.days.forEach(day => {
+    const set = new Set();
+    for (let m = day.startMinutes; m < day.endMinutes; m += poll.slotMinutes) set.add(m);
+    pollFormDayTimes.set(day.date, set);
+  });
+  const firstDate = poll.days.length ? parseDate(poll.days[0].date) : new Date();
+  pollFormCalendarMonth = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1);
+  pollFormStep = 'dates';
+  renderPollFormStep();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
