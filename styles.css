@@ -1833,6 +1833,12 @@ body.top-active .top-hero-stat.clickable:hover {
   touch-action: pan-x pan-y;
 }
 
+/* ロック中でも、すでに自分が選択済みの時間帯は斜線で隠さず色を出したままにする
+   （「入力開始」を押す前に自分が何を選んでいたか分からなくなるのを防ぐ） */
+.poll-cell.locked.selected {
+  background: var(--main);
+}
+
 /* その候補日には設定されていない時間帯（他の日は時間が違う場合の空白マス）。
    選択不可なのでロック中とは見た目を変え、罫線だけ残して背景を消す */
 .poll-cell.unavailable {
