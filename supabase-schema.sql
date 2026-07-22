@@ -334,6 +334,14 @@ update public.availability_polls set answer_token = encode(gen_random_bytes(18),
 alter table public.availability_polls alter column answer_token set not null;
 alter table public.availability_polls alter column answer_token set default encode(gen_random_bytes(18), 'hex');
 
+-- 回答期限（任意）。events.answer_deadlineと同じ考え方：過ぎたら一般メンバーは
+-- 入力できなくなる（管理者は期限後も編集可能）
+alter table public.availability_polls add column if not exists answer_deadline date null;
+
+-- 回答期限の前日リマインドメール（deadline-reminder Edge Function）を
+-- 二重送信しないための記録用。events.reminder_sent_atと同じ役割
+alter table public.availability_polls add column if not exists reminder_sent_at timestamptz null;
+
 -- 1メンバー・1日・1時間帯（slot_start_minutesはその日の0:00からの分）ごとに
 -- 「空いている」という申告を1行で表す。ドラッグ選択の追加/解除はinsert/deleteで行う。
 create table if not exists public.availability_slots (
@@ -668,9 +676,41 @@ on public.availability_slots for select
 to authenticated
 using (true);
 
+-- 日程アンケートも予定（events）と同様、回答期限を過ぎたら管理者以外は
+-- 書き込み/削除できないようにする（画面側の入力欄無効化だけだとAPIを
+-- 直接叩けば回避できてしまうため。answer_deadline_okと同じ考え方）
+create or replace function public.poll_deadline_ok(target_poll_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select not exists (
+    select 1 from public.availability_polls p
+    where p.id = target_poll_id
+      and p.answer_deadline is not null
+      and p.answer_deadline < current_date
+  );
+$$;
+
 drop policy if exists "availability_slots write self or admin" on public.availability_slots;
-create policy "availability_slots write self or admin"
-on public.availability_slots for all
+
+drop policy if exists "availability_slots insert self or admin" on public.availability_slots;
+create policy "availability_slots insert self or admin"
+on public.availability_slots for insert
+to authenticated
+with check (
+  public.is_admin()
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.poll_deadline_ok(poll_id)
+  )
+);
+
+drop policy if exists "availability_slots update self or admin" on public.availability_slots;
+create policy "availability_slots update self or admin"
+on public.availability_slots for update
 to authenticated
 using (
   public.is_admin()
@@ -678,7 +718,22 @@ using (
 )
 with check (
   public.is_admin()
-  or member_id = (select member_id from public.profiles where id = auth.uid())
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.poll_deadline_ok(poll_id)
+  )
+);
+
+drop policy if exists "availability_slots delete self or admin" on public.availability_slots;
+create policy "availability_slots delete self or admin"
+on public.availability_slots for delete
+to authenticated
+using (
+  public.is_admin()
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.poll_deadline_ok(poll_id)
+  )
 );
 
 alter table public.availability_notes enable row level security;
@@ -690,8 +745,22 @@ to authenticated
 using (true);
 
 drop policy if exists "availability_notes write self or admin" on public.availability_notes;
-create policy "availability_notes write self or admin"
-on public.availability_notes for all
+
+drop policy if exists "availability_notes insert self or admin" on public.availability_notes;
+create policy "availability_notes insert self or admin"
+on public.availability_notes for insert
+to authenticated
+with check (
+  public.is_admin()
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.poll_deadline_ok(poll_id)
+  )
+);
+
+drop policy if exists "availability_notes update self or admin" on public.availability_notes;
+create policy "availability_notes update self or admin"
+on public.availability_notes for update
 to authenticated
 using (
   public.is_admin()
@@ -699,7 +768,22 @@ using (
 )
 with check (
   public.is_admin()
-  or member_id = (select member_id from public.profiles where id = auth.uid())
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.poll_deadline_ok(poll_id)
+  )
+);
+
+drop policy if exists "availability_notes delete self or admin" on public.availability_notes;
+create policy "availability_notes delete self or admin"
+on public.availability_notes for delete
+to authenticated
+using (
+  public.is_admin()
+  or (
+    member_id = (select member_id from public.profiles where id = auth.uid())
+    and public.poll_deadline_ok(poll_id)
+  )
 );
 
 alter table public.availability_poll_days enable row level security;

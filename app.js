@@ -50,6 +50,10 @@ let pollViewInitialized = false;
 let pollRefreshTimer = null;
 let pollActingMemberId = '';
 let pollPendingChanges = new Map();
+// トップ画面の「未回答」表示用：自分が何かしら回答済み（空き時間 or 備考）の
+// 日程アンケートID一覧。個々のpollを開かなくても未回答件数を出せるように、
+// ログイン後まとめて読み込んでおく
+let myAnsweredPollIds = new Set();
 
 // 管理者の日程アンケート作成フォーム：候補日はカレンダーから複数タップで選び、
 // 「完了」を押すと各候補日の時間帯をスワイプで指定するステップに進む
@@ -502,8 +506,27 @@ function schedulePollSlotsRefresh() {
 }
 
 async function refreshAll() {
+  // トップ画面の未回答表示がloadPublicData末尾のrenderTopHighlights()で
+  // 計算されるため、先にポール関連データを読み込んでおく
+  await Promise.all([loadAvailabilityPolls(), loadMyAnsweredPollIds()]);
   await loadPublicData();
   if (currentAnswerToken) await loadAnswerData(currentAnswerToken);
+}
+
+async function loadMyAnsweredPollIds() {
+  const memberId = currentProfile ? currentProfile.member_id : null;
+  if (!memberId) {
+    myAnsweredPollIds = new Set();
+    return;
+  }
+  const [{ data: slotRows }, { data: noteRows }] = await Promise.all([
+    supabaseClient.from('availability_slots').select('poll_id').eq('member_id', memberId),
+    supabaseClient.from('availability_notes').select('poll_id').eq('member_id', memberId)
+  ]);
+  const ids = new Set();
+  (slotRows || []).forEach(row => ids.add(row.poll_id));
+  (noteRows || []).forEach(row => ids.add(row.poll_id));
+  myAnsweredPollIds = ids;
 }
 
 async function loadOptions() {
@@ -2404,11 +2427,25 @@ function renderTopHighlights() {
       return answer && answer.status === '未回答';
     });
     const pendingCount = pendingEvents.length;
-    pendingBox.classList.toggle('clickable', pendingCount > 0);
-    pendingBox.onclick = pendingCount ? () => switchView('public') : null;
-    pendingBox.innerHTML = pendingCount
-      ? `<span class="muted">あなたの回答：</span>未回答${pendingCount}件<span class="badge pending">要回答</span>`
-      : `<span class="muted">あなたの回答：</span>未回答はありません`;
+
+    // 期限切れ（もう回答できない）ものはナグ表示から除外する
+    const pendingPolls = availabilityPolls.filter(poll =>
+      poll.publicState !== '削除' && !isPollPastDeadline(poll) && !myAnsweredPollIds.has(poll.pollId)
+    );
+    const pendingPollCount = pendingPolls.length;
+
+    if (!pendingCount && !pendingPollCount) {
+      pendingBox.classList.remove('clickable');
+      pendingBox.onclick = null;
+      pendingBox.innerHTML = `<span class="muted">あなたの回答：</span>未回答はありません`;
+    } else {
+      const parts = [];
+      if (pendingCount) parts.push(`予定${pendingCount}件`);
+      if (pendingPollCount) parts.push(`日程アンケート${pendingPollCount}件`);
+      pendingBox.classList.add('clickable');
+      pendingBox.onclick = () => switchView(pendingCount ? 'public' : 'poll');
+      pendingBox.innerHTML = `<span class="muted">あなたの回答：</span>未回答${parts.join('・')}<span class="badge pending">要回答</span>`;
+    }
   } else {
     pendingBox.classList.remove('clickable');
     pendingBox.onclick = null;
@@ -2687,6 +2724,7 @@ function normalizePoll(row, days) {
     slotMinutes: Number.isFinite(row.slot_minutes) ? row.slot_minutes : 30,
     publicState: row.public_state || '公開',
     answerToken: row.answer_token || '',
+    answerDeadline: normalizeDate(row.answer_deadline),
     createdAt: row.created_at || ''
   };
 }
@@ -2696,6 +2734,18 @@ function formatPollDaysSummary(poll) {
   if (!poll.days.length) return '-';
   if (poll.days.length <= 3) return poll.days.map(d => formatDate(d.date)).join('・');
   return `${formatDate(poll.days[0].date)}〜${formatDate(poll.days[poll.days.length - 1].date)}（他${poll.days.length - 2}日）`;
+}
+
+function isPollPastDeadline(poll) {
+  const deadline = parseDate(poll.answerDeadline);
+  if (!deadline) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today > deadline;
+}
+
+function isPollAnswerLocked(poll) {
+  return isPollPastDeadline(poll) && !canProxyOthers();
 }
 
 // 全候補日をまたいだ共通の時間軸（グリッドの行）を出すため、
@@ -2790,7 +2840,12 @@ async function onPollSelectChange() {
   }
   currentPoll = availabilityPolls.find(poll => poll.pollId === pollId);
   if (!currentPoll) return;
-  document.getElementById('pollStatus').textContent = '';
+  const statusBox = document.getElementById('pollStatus');
+  const deadlineLocked = isPollAnswerLocked(currentPoll);
+  statusBox.classList.toggle('notice', deadlineLocked);
+  statusBox.textContent = deadlineLocked
+    ? `回答期限（${formatDate(currentPoll.answerDeadline)}）を過ぎているため、入力・変更できません。内容を直したい場合は管理者に連絡してください。`
+    : '';
   document.getElementById('pollBox').classList.remove('hidden');
   document.getElementById('pollNote').textContent = currentPoll.note || '';
   pollPageOffset = 0;
@@ -2856,6 +2911,7 @@ async function loadPollNotes(pollId) {
 
 async function savePollNoteField() {
   if (!currentPoll) return;
+  if (isPollAnswerLocked(currentPoll)) return;
   const memberId = getPollActingMemberId();
   if (!memberId) return;
   const note = document.getElementById('pollNoteInputField').value.trim();
@@ -2868,10 +2924,24 @@ async function savePollNoteField() {
     return;
   }
   await loadPollNotes(currentPoll.pollId);
+  markPollAnsweredIfSelf(memberId, currentPoll.pollId);
+}
+
+// トップ画面の未回答件数を、次のログイン/再読み込みを待たずに即座に反映する
+// （代理入力で他メンバー分を変更した場合は自分の未回答扱いには影響しない）
+function markPollAnsweredIfSelf(memberId, pollId) {
+  const myMemberId = currentProfile ? currentProfile.member_id : null;
+  if (!myMemberId || memberId !== myMemberId || myAnsweredPollIds.has(pollId)) return;
+  myAnsweredPollIds.add(pollId);
+  renderTopHighlights();
 }
 
 async function resetPollSelection() {
   if (!currentPoll) return;
+  if (isPollAnswerLocked(currentPoll)) {
+    alert('回答期限を過ぎているためリセットできません。');
+    return;
+  }
   const memberId = getPollActingMemberId();
   if (!memberId) return;
   if (!confirm('この日程アンケートで入力した空き時間をすべてリセットしますか？')) return;
@@ -2946,19 +3016,25 @@ function armPollInput() {
 
 function renderPollView() {
   if (!currentPoll) return;
+  const deadlineLocked = isPollAnswerLocked(currentPoll);
+  if (deadlineLocked) pollInputArmed = false;
+
   document.getElementById('pollModeInputButton').classList.toggle('active', pollMode === 'input');
   document.getElementById('pollModeResultButton').classList.toggle('active', pollMode === 'result');
   document.getElementById('pollInputControls').classList.toggle('hidden', pollMode !== 'input');
   document.getElementById('pollNoteInputWrap').classList.toggle('hidden', pollMode !== 'input');
   document.getElementById('pollSuggestions').classList.toggle('hidden', pollMode !== 'result');
-  document.getElementById('pollArmButton').classList.toggle('hidden', !(pollMode === 'input' && !pollInputArmed));
-  document.getElementById('pollInputArmHint').classList.toggle('hidden', !(pollMode === 'input' && !pollInputArmed));
+  document.getElementById('pollArmButton').classList.toggle('hidden', deadlineLocked || !(pollMode === 'input' && !pollInputArmed));
+  document.getElementById('pollInputArmHint').classList.toggle('hidden', deadlineLocked || !(pollMode === 'input' && !pollInputArmed));
   document.getElementById('pollInputHint').classList.toggle('hidden', !(pollMode === 'input' && pollInputArmed));
 
   const actingMemberId = getPollActingMemberId();
   const actingNote = currentPollNotes.find(item => item.memberId === actingMemberId);
   const noteField = document.getElementById('pollNoteInputField');
-  if (noteField && document.activeElement !== noteField) noteField.value = actingNote ? actingNote.note : '';
+  if (noteField) {
+    noteField.disabled = deadlineLocked;
+    if (document.activeElement !== noteField) noteField.value = actingNote ? actingNote.note : '';
+  }
 
   const days = getPollPageDays(currentPoll, pollPageOffset);
   const navButtons = document.querySelectorAll('.poll-week-nav button');
@@ -3239,6 +3315,10 @@ function discardPendingPollChangesIfConfirmed() {
 
 async function commitPendingPollChanges() {
   if (!currentPoll || !pollPendingChanges.size) return;
+  if (isPollAnswerLocked(currentPoll)) {
+    alert('回答期限を過ぎているため保存できません。');
+    return;
+  }
   const memberId = getPollActingMemberId();
   if (!memberId) {
     alert(canProxyOthers() ? '代理入力するメンバーを選択してください。' : 'メンバーに紐付いたアカウントでログインしてください。');
@@ -3277,6 +3357,7 @@ async function commitPendingPollChanges() {
   await loadPollSlots(currentPoll.pollId);
   renderPollView();
   updatePollPendingIndicator();
+  if (toAdd.length) markPollAnsweredIfSelf(memberId, currentPoll.pollId);
 }
 
 // 候補日の行を1つ追加する。dayを渡すと既存データで埋める（編集フォーム用）、
@@ -3579,6 +3660,7 @@ async function savePollForm() {
     day_start_minutes: Math.min(...days.map(d => d.startMinutes)),
     day_end_minutes: Math.max(...days.map(d => d.endMinutes)),
     slot_minutes: slotMinutes,
+    answer_deadline: nullIfEmpty(document.getElementById('pollDeadlineInput').value),
     updated_at: new Date().toISOString()
   };
 
@@ -3611,6 +3693,7 @@ function clearPollForm() {
   document.getElementById('pollId').value = '';
   document.getElementById('pollTitle').value = '';
   document.getElementById('pollSlotMinutes').value = '30';
+  document.getElementById('pollDeadlineInput').value = '';
   document.getElementById('pollNoteInput').value = '';
   pollFormSelectedDates = new Set();
   pollFormDayTimes = new Map();
@@ -3626,6 +3709,7 @@ function editPollForm(pollId) {
   document.getElementById('pollId').value = poll.pollId;
   document.getElementById('pollTitle').value = poll.title;
   document.getElementById('pollSlotMinutes').value = String(poll.slotMinutes);
+  document.getElementById('pollDeadlineInput').value = poll.answerDeadline || '';
   document.getElementById('pollNoteInput').value = poll.note || '';
 
   pollFormSelectedDates = new Set(poll.days.map(d => d.date));
@@ -3672,6 +3756,7 @@ function renderAdminPolls() {
       <td data-label="状態">${escapeHtml(poll.publicState === '削除' ? '削除済み' : '公開')}</td>
       <td data-label="タイトル">${escapeHtml(poll.title)}</td>
       <td data-label="候補日">${escapeHtml(formatPollDaysSummary(poll))}</td>
+      <td data-label="回答期限">${escapeHtml(formatDate(poll.answerDeadline) || '-')}</td>
       <td class="wrap" data-label="共有リンク"><div class="share-actions"><a href="${escapeAttr(createPollScheduleUrl(poll.answerToken))}" target="_blank" rel="noopener noreferrer">日程アンケートリンク</a><button type="button" data-copy-poll-share="${escapeAttr(poll.pollId)}">共有文コピー</button></div></td>
       <td data-label="操作">
         <button type="button" data-edit-poll="${escapeAttr(poll.pollId)}">編集</button>
@@ -3681,7 +3766,7 @@ function renderAdminPolls() {
       </td>
     </tr>
   `).join('');
-  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>タイトル</th><th>候補日</th><th>共有リンク</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="5">日程アンケートがありません。</td></tr>'}</tbody></table></div>`;
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>タイトル</th><th>候補日</th><th>回答期限</th><th>共有リンク</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="6">日程アンケートがありません。</td></tr>'}</tbody></table></div>`;
 }
 
 function handleAdminPollsClick(domEvent) {

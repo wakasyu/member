@@ -1,4 +1,4 @@
-# 若衆メンバー専用サイト — プロジェクト状況（2026-07-21時点）
+# 若衆メンバー専用サイト — プロジェクト状況（2026-07-22時点）
 
 このファイルは「今このプロジェクトが何であり、何が済んでいて、何が未確認か」を
 会話の続きが無くても把握できるようにするための引き継ぎメモ。README.mdは利用者向け、
@@ -127,7 +127,16 @@
   sticky要素の基準（＝最も近いスクロールコンテナ）としては機能せず、
   見出し行が固定されない。`overflow-x`だけ指定して`overflow-y:visible`を
   期待する書き方は成立しないので、スクロールを固定したい方向には必ず
-  `max-height`等で実際にスクロールする箱を作ること）
+  `max-height`等で実際にスクロールする箱を作ること）。
+  2026-07-22に回答期限（`availability_polls.answer_deadline`、任意）を追加。
+  events/answersと同じパターンで、`poll_deadline_ok()`関数＋
+  `availability_slots`/`availability_notes`のRLS（insert/update/delete）で
+  期限後は管理者以外書き込み不可にし、画面側も`isPollAnswerLocked()`で
+  「入力開始」ボタン非表示・備考欄disabled・案内メッセージ表示にする
+  （管理者は`canProxyOthers()`が真の間は期限後も編集可）。トップ画面の
+  「あなたの回答：未回答」表示にも、未回答（空き時間・備考のどちらも未入力）
+  かつ期限切れでない日程アンケートの件数を含めるようにした
+  （`myAnsweredPollIds`、`loadMyAnsweredPollIds()`、`renderTopHighlights()`）
 - 予定追加・編集フォーム：対象メンバーは全員にチェックボックスがあり自由に
   絞り込める（未変更なら在籍期間から自動判定、日付を変えると自動でプレビューが
   更新される。一度でも手動でチェックを変えたらそれ以降は上書きされない）。
@@ -145,16 +154,23 @@
   トップ写真管理、メンバー表示順の並び替え（▲▼ボタン）、メンバー削除
 - 管理者用テーブルは幅700px以下でカード表示に自動切替（横スクロール不要）
 - メール通知（Resend経由）：回答が対象メンバー全員分揃った時だけ管理者に通知
-- 回答期限リマインドメール（Resend経由）：予定の`answer_deadline`が翌日（JST）
-  になった時点で、その予定にまだ未回答のメンバーがいれば、予定名・未回答者名を
-  まとめて管理者（`ADMIN_NOTIFY_EMAIL`）へ通知する（メンバー本人への個別送信
-  ではなく、管理者が声かけできるようにするためのもの）。
-  `supabase/functions/deadline-reminder`をpg_cronから毎日1回
-  （23:00 UTC = 8:00 JST想定）起動する設計で、行の変更では起動できないため
-  notify-answerとは別方式（pg_cron + `net.http_post`）を使う。送信はnotify-answer
-  と同じResend/ADMIN_NOTIFY_EMAILを共用（宛先が管理者1人だけなのでGmail SMTPは
-  不要）。二重送信防止に`events.reminder_sent_at`を使用。対象者・未回答判定の
-  ロジックはnotify-answerの「全員回答完了」判定と同じ考え方を流用
+- 回答期限リマインドメール（Resend経由）：予定・日程アンケートそれぞれの
+  `answer_deadline`が翌日（JST）になった時点で、まだ未回答のメンバーがいれば
+  対象名・未回答者名をまとめて管理者（`ADMIN_NOTIFY_EMAIL`）へ通知する
+  （メンバー本人への個別送信ではなく、管理者が声かけできるようにするための
+  もの）。予定と日程アンケートは1通のメールに【予定】【日程アンケート】の
+  セクションとしてまとめて送る。`supabase/functions/deadline-reminder`を
+  pg_cronから毎日1回（23:00 UTC = 8:00 JST想定）起動する設計で、行の変更では
+  起動できないためnotify-answerとは別方式（pg_cron + `net.http_post`）を使う。
+  送信はnotify-answerと同じResend/ADMIN_NOTIFY_EMAILを共用（宛先が管理者1人
+  だけなのでGmail SMTPは不要）。二重送信防止に`events.reminder_sent_at` /
+  `availability_polls.reminder_sent_at`を使用。予定側の対象者・未回答判定は
+  notify-answerの「全員回答完了」判定と同じ考え方。日程アンケート側は
+  対象者を絞る仕組みが無いため在籍中の全メンバーを対象にし、「空き時間
+  （availability_slots）も備考（availability_notes）も1件も無い」ことを
+  もって未回答とみなす（0件の空き時間そのものが「その期間は全部埋まって
+  いる」という意思表示である可能性と区別できないための割り切り。備考だけ
+  書いてあれば回答済み扱いにする）
 - リアルタイム反映（Supabase Realtime）
 - ホーム画面追加用アイコン（apple-touch-icon + manifest.json）
 - 右下固定UI（表示モード切替・回答完了バー）はページ最下部のボタン等に
@@ -201,10 +217,15 @@
   アカウント登録メール以外には送信できない（notify-answer用。register-member
   の方は上記の通りGmail SMTPに切り替え済みなのでこの制限を受けない）。
   他の管理者にはGmailの転送フィルタで届くよう設定済み。
-- Edge Function `deadline-reminder`：2026-07-21に実装。**まだ未デプロイ・
-  pg_cronも未設定**（コードとschema.sqlの記述だけ用意した段階。デプロイ・
-  `pg_cron`拡張の有効化・secrets設定・cronジョブ登録はユーザー確認後に実行する
-  予定）。デプロイ手順はsupabase-schema.sqlの該当コメント欄を参照。
+- Edge Function `deadline-reminder`：2026-07-21にデプロイ済み（ACTIVE、
+  `--no-verify-jwt`）。`pg_cron`拡張を有効化し、`deadline-reminder-daily`
+  ジョブ（毎日23:00 UTC = 8:00 JST起動、jobid=1）を登録済み。認可用の
+  `DEADLINE_REMINDER_SECRET`もsecretsに設定済み。未認証リクエストが401で
+  拒否されることを確認済み。2026-07-22に日程アンケートの期限リマインドも
+  同じ関数に統合したため、schema変更後は`supabase functions deploy
+  deadline-reminder --no-verify-jwt`で再デプロイが必要（cronジョブ自体の
+  再登録は不要、関数の中身だけ差し替わる）。デプロイ手順は
+  supabase-schema.sqlの該当コメント欄を参照。
 - `availability_poll_days`テーブルを2026-07-21に追加（日程アンケートの
   候補日ごとの時間帯管理用）。既存アンケートは`supabase-schema.sql`内の
   1回限りの移行SQLで自動的に新モデルへ移行される（候補日が1件でもあれば
