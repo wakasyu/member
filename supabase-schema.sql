@@ -136,6 +136,36 @@ begin
 end;
 $$;
 
+-- 「研修」役割（入会前・研修期間中の候補者用）を追加。is_admin()/is_staff()の
+-- どちらにも該当しないため、DB上の権限・RLSの扱いは通常のmemberと全く同じ
+-- （画面上のラベル表示だけ「研修」と区別する）。将来アカウントを実際に
+-- 発行する際に備えて、区分だけ先に用意しておく
+do $$
+declare
+  con_name text;
+begin
+  select conname into con_name
+  from pg_constraint
+  where conrelid = 'public.profiles'::regclass
+    and contype = 'c'
+    and pg_get_constraintdef(oid) ilike '%role%'
+    and pg_get_constraintdef(oid) not ilike '%研修%'
+  limit 1;
+  if con_name is not null then
+    execute format('alter table public.profiles drop constraint %I', con_name);
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.profiles'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%role%'
+      and pg_get_constraintdef(oid) ilike '%研修%'
+  ) then
+    alter table public.profiles add constraint profiles_role_check check (role in ('admin', 'member', 'staff', '研修'));
+  end if;
+end;
+$$;
+
 create table if not exists public.members (
   id uuid primary key default gen_random_uuid(),
   name text not null,

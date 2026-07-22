@@ -432,8 +432,13 @@ function renderAdminModeSwitcher() {
 function updateUserMetaLabel() {
   const el = document.getElementById('userMeta');
   if (!el || !currentProfile) return;
-  // 表示モードが「メンバー」の間は本当のメンバーと同じ見え方にする
-  const roleLabel = isStaff() ? '政やスタッフ' : (isAdmin() && adminViewMode === 'member') ? 'メンバー' : isAdmin() ? '管理者' : 'メンバー';
+  // 表示モードが「メンバー」の間は本当のメンバーと同じ見え方にする。
+  // 「研修」は権限上はメンバーと同じだが、ラベルだけは区別して表示する
+  const roleLabel = isStaff() ? '政やスタッフ'
+    : (isAdmin() && adminViewMode === 'member') ? 'メンバー'
+    : isAdmin() ? '管理者'
+    : currentProfile.role === '研修' ? '研修'
+    : 'メンバー';
   const displayLabel = isStaff() ? (staffDisplayName || '政やスタッフ') : (currentProfile.display_name || (sessionUser && sessionUser.email) || '');
   el.textContent = `${displayLabel} / ${roleLabel}`;
 }
