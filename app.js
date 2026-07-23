@@ -3172,10 +3172,27 @@ function computeSuggestions() {
   return { blocks: topBlocks, days: dayPeaks };
 }
 
+// 在籍中のメンバーのうち、空き時間（availability_slots）も備考
+// （availability_notes、空文字は除く）もどちらも無い人＝未回答とみなす。
+// deadline-reminder Edge Functionの未回答判定と同じ考え方
+function computeUnansweredPollMembers() {
+  const answeredIds = new Set();
+  currentPollSlots.forEach(slot => answeredIds.add(slot.memberId));
+  currentPollNotes.forEach(item => { if (item.note && item.note.trim()) answeredIds.add(item.memberId); });
+  return publicData.members
+    .filter(member => member.memberState !== '退会' && !answeredIds.has(member.memberId))
+    .sort((a, b) => displayName(a).localeCompare(displayName(b), 'ja'));
+}
+
 function renderPollSuggestions() {
   const { blocks, days } = computeSuggestions();
   const box = document.getElementById('pollSuggestions');
   if (!box) return;
+
+  const unanswered = computeUnansweredPollMembers();
+  const unansweredHtml = unanswered.length
+    ? unanswered.map(member => `<li>${escapeHtml(displayName(member))}</li>`).join('')
+    : '<li class="muted">全員回答済みです。</li>';
 
   const blockHtml = blocks.length
     ? blocks.map(block => {
@@ -3200,6 +3217,10 @@ function renderPollSuggestions() {
     : '';
 
   box.innerHTML = `
+    <div class="poll-suggestion-group poll-suggestion-unanswered">
+      <h3>未回答のメンバー${unanswered.length ? `（${unanswered.length}人）` : ''}</h3>
+      <ul>${unansweredHtml}</ul>
+    </div>
     <div class="poll-suggestion-group">
       <h3>みんなが空いている時間帯 候補トップ3</h3>
       <ul>${blockHtml}</ul>
