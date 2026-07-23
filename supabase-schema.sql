@@ -987,7 +987,12 @@ $$;
 --   select net.http_post(
 --     url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/deadline-reminder',
 --     headers := jsonb_build_object('Content-Type', 'application/json', 'x-webhook-secret', 'YOUR_DEADLINE_REMINDER_SECRET'),
---     body := '{}'::jsonb
+--     body := '{}'::jsonb,
+--     -- net.http_postの既定タイムアウトは5秒だが、予定・日程アンケートの
+--     -- 両方を毎回スキャンする分、実測で6秒前後かかることがあるため余裕を持たせる
+--     -- （タイムアウトしても関数自体はサーバー側で最後まで実行され続けるため
+--     -- 実害は無いが、pg_cron側の実行ログがtimed_out表示になって紛らわしい）
+--     timeout_milliseconds := 20000
 --   );
 --   $$
 -- );
