@@ -372,6 +372,10 @@ alter table public.availability_polls add column if not exists answer_deadline d
 -- 二重送信しないための記録用。events.reminder_sent_atと同じ役割
 alter table public.availability_polls add column if not exists reminder_sent_at timestamptz null;
 
+-- 対象メンバー全員が回答し終わった時の「完了メール」（notify-answer）を
+-- 二重送信しないための記録用。events.completion_notified_atと同じ役割
+alter table public.availability_polls add column if not exists completion_notified_at timestamptz null;
+
 -- 1メンバー・1日・1時間帯（slot_start_minutesはその日の0:00からの分）ごとに
 -- 「空いている」という申告を1行で表す。ドラッグ選択の追加/解除はinsert/deleteで行う。
 create table if not exists public.availability_slots (
@@ -956,6 +960,32 @@ $$;
 -- drop trigger if exists notify_answer_change on public.answers;
 -- create trigger notify_answer_change
 -- after insert or update on public.answers
+-- for each row execute function supabase_functions.http_request(
+--   'https://YOUR_PROJECT_REF.supabase.co/functions/v1/notify-answer',
+--   'POST',
+--   '{"Content-type":"application/json","x-webhook-secret":"YOUR_WEBHOOK_SECRET"}',
+--   '{}',
+--   '5000'
+-- );
+--
+-- 日程アンケート（availability_slots/availability_notes）が全員分そろった時の
+-- 通知も同じnotify-answer関数で処理する（payloadのtableフィールドで判定）。
+-- 同じWEBHOOK_SECRETを使うので、上のnotify_answer_changeと合わせて設定する
+--
+-- drop trigger if exists notify_poll_slot_change on public.availability_slots;
+-- create trigger notify_poll_slot_change
+-- after insert or update on public.availability_slots
+-- for each row execute function supabase_functions.http_request(
+--   'https://YOUR_PROJECT_REF.supabase.co/functions/v1/notify-answer',
+--   'POST',
+--   '{"Content-type":"application/json","x-webhook-secret":"YOUR_WEBHOOK_SECRET"}',
+--   '{}',
+--   '5000'
+-- );
+--
+-- drop trigger if exists notify_poll_note_change on public.availability_notes;
+-- create trigger notify_poll_note_change
+-- after insert or update on public.availability_notes
 -- for each row execute function supabase_functions.http_request(
 --   'https://YOUR_PROJECT_REF.supabase.co/functions/v1/notify-answer',
 --   'POST',

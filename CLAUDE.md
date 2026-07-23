@@ -147,7 +147,10 @@
   （管理者は`canProxyOthers()`が真の間は期限後も編集可）。トップ画面の
   「あなたの回答：未回答」表示にも、未回答（空き時間・備考のどちらも未入力）
   かつ期限切れでない日程アンケートの件数を含めるようにした
-  （`myAnsweredPollIds`、`loadMyAnsweredPollIds()`、`renderTopHighlights()`）
+  （`myAnsweredPollIds`、`loadMyAnsweredPollIds()`、`renderTopHighlights()`）。
+  2026-07-23に「結果を見る」画面へ「未回答のメンバー」欄も追加
+  （`computeUnansweredPollMembers()`）。対象メンバー全員が回答済みになった
+  時の管理者向け「全員そろいました」メール（notify-answer）にも対応
 - 予定追加・編集フォーム：対象メンバーは全員にチェックボックスがあり自由に
   絞り込める（未変更なら在籍期間から自動判定、日付を変えると自動でプレビューが
   更新される。一度でも手動でチェックを変えたらそれ以降は上書きされない）。
@@ -208,6 +211,14 @@
   書き込みは管理者のみ」。
 - Edge Function `notify-answer`：デプロイ・secrets設定済み（動作確認済み）。
   `RESEND_API_KEY` / `ADMIN_NOTIFY_EMAIL` / `NOTIFY_FROM_EMAIL` / `WEBHOOK_SECRET`。
+  2026-07-23に日程アンケートの「全員回答完了」通知にも対応（`availability_polls
+  .completion_notified_at`）。`availability_slots`/`availability_notes`への
+  insert/updateでも同じ関数を呼ぶよう`notify_poll_slot_change`/
+  `notify_poll_note_change`トリガーを追加し、`payload.table`
+  （`supabase_functions.http_request()`が自動で付与するTG_TABLE_NAME）で
+  予定用/日程アンケート用の処理を振り分けている。この変更に伴い
+  `WEBHOOK_SECRET`を作り直したため、`answers`用の既存トリガー
+  （`notify_answer_change`）も新しい値で再作成し直した
 - Edge Function `register-member`：登録完了メールは
   Resendではなく **Gmail SMTP**（`GMAIL_USER` / `GMAIL_APP_PASSWORD` secrets、
   denomailer経由）で送信するよう変更済み（Resendは送信ドメイン未認証だと
