@@ -595,6 +595,22 @@ textarea {
   font-size: 13px;
 }
 
+.guide-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.guide-list li {
+  line-height: 1.6;
+}
+
+.guide-rules li strong {
+  color: var(--main-2);
+}
+
 .month {
   overflow: hidden;
   margin-bottom: 16px;
