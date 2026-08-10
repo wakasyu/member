@@ -47,13 +47,18 @@
   `is_admin()`/`is_staff()`のどちらにも該当しないため、**DB上の権限・RLSは
   memberと完全に同じ**（当面そのままでよいとユーザーに確認済み。制限が
   必要になったら都度相談）。ヘッダーの役割ラベルだけ「研修」と表示される
-  （`updateUserMetaLabel()`）。**まだ実際のアカウントは作成していない**
-  （対象者のメールアドレスは今後ユーザーから提供される予定）。作成する際は
-  スタッフと同様、SQL Editorで
-  `insert into public.profiles (id, display_name, role, member_id) values ('（UUID）', '氏名', '研修', 'メンバー行のUUID');`
-  のように作成する想定（`register-member`招待リンクはrole='member'固定で
-  作るため、研修者を招待リンク経由で登録させたい場合は別途対応が必要になる
-  かもしれない点に注意）
+  （`updateUserMetaLabel()`）。2026-08-10に、`members.member_state`（在籍状態）
+  にも「研修」を追加し、管理画面のメンバー編集フォームの「在籍状態」から
+  直接設定できるようにした（`isCurrentUserInTraining()`が
+  `profiles.role === '研修'`または本人の`member_state === '研修'`のどちらかで
+  判定する）。これにより、SQL Editorでの`profiles.role`直接変更は必須では
+  なくなった（`register-member`招待リンクはrole='member'固定で作るため、
+  登録後に管理画面で在籍状態を「研修」に変更する運用）。旧来のSQL直接変更
+  （`insert into public.profiles (...) values (..., '研修', ...);`）も
+  互換性のため引き続き使える
+- 2026-08-10に、メンバー編集フォームから「学年」入力欄を廃止した
+  （`members.grade`列自体はDBに残すが、画面上のフォーム・管理者用一覧テーブル
+  からは削除。既存データがあっても表示・編集はされなくなる）
 
 ## できていること（機能一覧）
 

@@ -198,6 +198,36 @@ alter table public.members add column if not exists duty text not null default '
 -- 予定一覧などでの表示順。管理画面のメンバー一覧から並び替えられるようにする
 alter table public.members add column if not exists sort_order integer not null default 0;
 
+-- 在籍状態（member_state）に「研修」を追加（2026-08-10）。profiles.roleの
+-- 「研修」（ログイン権限の区分）とは別で、こちらは名簿上の在籍区分。
+-- 在籍状態が「研修」のメンバーは、ヘッダーの「名前 / 役割」表示でも
+-- 役割側が自動的に「研修」になる（app.js側のupdateUserMetaLabel()参照）。
+do $$
+declare
+  con_name text;
+begin
+  select conname into con_name
+  from pg_constraint
+  where conrelid = 'public.members'::regclass
+    and contype = 'c'
+    and pg_get_constraintdef(oid) ilike '%member_state%'
+    and pg_get_constraintdef(oid) not ilike '%研修%'
+  limit 1;
+  if con_name is not null then
+    execute format('alter table public.members drop constraint %I', con_name);
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.members'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%member_state%'
+      and pg_get_constraintdef(oid) ilike '%研修%'
+  ) then
+    alter table public.members add constraint members_member_state_check check (member_state in ('在籍', '休会', '退会', '研修'));
+  end if;
+end;
+$$;
+
 -- メンバー自己登録は「既存メンバー行に招待トークンを付与する」方式ではなく、
 -- 招待トークン自体を管理する専用テーブル（member_invites）に置き換えたため、
 -- この方式で使っていた列は使用しない。

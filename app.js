@@ -438,6 +438,19 @@ function renderAdminModeSwitcher() {
   });
 }
 
+// 「研修」はprofiles.role（過去にSQLで直接設定したもの）と、
+// members.member_state（管理画面のメンバー編集から設定できる在籍状態）
+// のどちらから見ても判定できるようにする。名簿の在籍状態を「研修」に
+// すれば、ヘッダーの役割表示も自動的に「研修」に切り替わる。
+function isCurrentUserInTraining() {
+  if (!currentProfile) return false;
+  if (currentProfile.role === '研修') return true;
+  const member = currentProfile.member_id
+    ? publicData.members.find(item => item.memberId === currentProfile.member_id)
+    : null;
+  return Boolean(member && member.memberState === '研修');
+}
+
 function updateUserMetaLabel() {
   const el = document.getElementById('userMeta');
   if (!el || !currentProfile) return;
@@ -446,7 +459,7 @@ function updateUserMetaLabel() {
   const roleLabel = isStaff() ? '政やスタッフ'
     : (isAdmin() && adminViewMode === 'member') ? 'メンバー'
     : isAdmin() ? '管理者'
-    : currentProfile.role === '研修' ? '研修'
+    : isCurrentUserInTraining() ? '研修'
     : 'メンバー';
   const displayLabel = isStaff() ? (staffDisplayName || '政やスタッフ') : (currentProfile.display_name || (sessionUser && sessionUser.email) || '');
   el.textContent = `${displayLabel} / ${roleLabel}`;
@@ -525,6 +538,9 @@ async function refreshAll() {
   await Promise.all([loadAvailabilityPolls(), loadMyAnsweredPollIds()]);
   await loadPublicData();
   if (currentAnswerToken) await loadAnswerData(currentAnswerToken);
+  // 在籍状態（member_state）が最新化された後に、ヘッダーの役割表示
+  // （研修かどうか）も合わせて更新する
+  updateUserMetaLabel();
 }
 
 async function loadMyAnsweredPollIds() {
@@ -1054,6 +1070,7 @@ function isActiveRoster(member) {
 function memberStateLabel(member) {
   if (member.memberState === '退会') return '退会';
   if (member.memberState === '休会') return '休会';
+  if (member.memberState === '研修') return '研修';
   if (member.visible === false) return '非表示';
   return '';
 }
@@ -1711,7 +1728,6 @@ function renderAdminMembers() {
       <td data-label="表示">${escapeHtml(member.visible ? '表示' : '非表示')}</td>
       <td data-label="状態">${escapeHtml(member.memberState)}</td>
       <td data-label="氏名">${escapeHtml(member.name)}</td>
-      <td data-label="学年">${escapeHtml(member.grade)}</td>
       <td class="wrap" data-label="電話番号">${escapeHtml(member.contact || '')}</td>
       <td data-label="担当">${escapeHtml(member.duty || '')}</td>
       ${detailCells}
@@ -1720,8 +1736,8 @@ function renderAdminMembers() {
   `;
   }).join('');
   const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>袴</th><th>Tシャツ</th><th>備考</th>' : '';
-  const colCount = showAll ? 15 : 8;
-  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>学年</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
+  const colCount = showAll ? 14 : 7;
+  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
 }
 
 function generateInviteToken() {
@@ -2194,7 +2210,6 @@ async function saveMemberForm() {
     id: memberId,
     name,
     short_name: document.getElementById('shortName').value.trim(),
-    grade: document.getElementById('grade').value.trim(),
     birth_date: nullIfEmpty(document.getElementById('birthDate').value),
     contact: phone,
     join_date: nullIfEmpty(document.getElementById('joinDate').value),
@@ -2230,7 +2245,6 @@ function editMember(memberId) {
   document.getElementById('memberId').value = member.memberId || '';
   document.getElementById('memberName').value = member.name || '';
   document.getElementById('shortName').value = member.shortName || '';
-  document.getElementById('grade').value = member.grade || '';
   document.getElementById('birthDate').value = member.birthDate || '';
   document.getElementById('contact').value = member.contact || '';
   document.getElementById('joinDate').value = member.joinDate || '';
@@ -2245,7 +2259,7 @@ function editMember(memberId) {
 }
 
 function clearMemberForm() {
-  ['memberId', 'memberName', 'shortName', 'grade', 'birthDate', 'contact', 'joinDate', 'leaveDate', 'costumeSize', 'tshirtSize', 'duty', 'memberNote'].forEach(id => {
+  ['memberId', 'memberName', 'shortName', 'birthDate', 'contact', 'joinDate', 'leaveDate', 'costumeSize', 'tshirtSize', 'duty', 'memberNote'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('memberState').value = '在籍';
