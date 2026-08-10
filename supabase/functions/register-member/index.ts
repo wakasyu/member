@@ -120,9 +120,13 @@ Deno.serve(async (req) => {
   }
   if (!name) return jsonResponse({ error: "氏名を入力してください。" }, 400);
 
+  // ハイフンは必須にしない（スマホの電話番号キーパッドはハイフンキーが
+  // 押しにくいため）。ハイフンや空白があっても構わないが、それらを
+  // 取り除いた残りが「0で始まる10〜11桁の数字」であることだけ確認する
+  // （app.js側のisValidPhoneNumber()と同じルール）。
   const contact = payload?.contact != null ? String(payload.contact).trim() : "";
-  if (contact && !/^[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4}$/.test(contact)) {
-    return jsonResponse({ error: "電話番号は「090-1234-5678」のようにハイフン区切りで入力してください。" }, 400);
+  if (contact && !/^0\d{9,10}$/.test(contact.replace(/[-\s]/g, ""))) {
+    return jsonResponse({ error: "電話番号を正しく入力してください（ハイフンは無くても構いません）。" }, 400);
   }
 
   const { data: invite } = await supabase

@@ -1,5 +1,14 @@
 const STATUS_LIST = ['参加', '不参加', '未定', '時間限定', '未回答'];
 
+// 電話番号の入力チェック。ハイフンは必須にしない（スマホの電話番号用
+// キーパッドはハイフンキーが押しにくく、数字だけ打てた方が楽なため）。
+// ハイフンや空白を含んでいても構わないが、それらを取り除いた残りが
+// 「0で始まる10〜11桁の数字」であることだけを確認する。
+function isValidPhoneNumber(value) {
+  const digits = String(value || '').replace(/[-\s]/g, '');
+  return /^0\d{9,10}$/.test(digits);
+}
+
 let supabaseClient = null;
 let sessionUser = null;
 let currentProfile = null;
@@ -252,8 +261,8 @@ async function showRegisterScreen(token) {
 async function submitRegisterForm(event) {
   event.preventDefault();
   const phone = document.getElementById('registerContact').value.trim();
-  if (phone && !/^[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4}$/.test(phone)) {
-    showMessage('registerMessage', '電話番号は「090-1234-5678」のようにハイフン区切りで入力してください。', false);
+  if (phone && !isValidPhoneNumber(phone)) {
+    showMessage('registerMessage', '電話番号を正しく入力してください（ハイフンは無くても構いません）。', false);
     return;
   }
 
@@ -2175,8 +2184,8 @@ async function saveMemberForm() {
   }
 
   const phone = document.getElementById('contact').value.trim();
-  if (phone && !/^[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4}$/.test(phone)) {
-    showMessage('memberMessage', '電話番号は「090-1234-5678」のようにハイフン区切りで入力してください。', false);
+  if (phone && !isValidPhoneNumber(phone)) {
+    showMessage('memberMessage', '電話番号を正しく入力してください（ハイフンは無くても構いません）。', false);
     return;
   }
 
