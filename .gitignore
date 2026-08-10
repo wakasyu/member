@@ -3,3 +3,4 @@ supabase/.branches/
 .env
 .env.local
 photos/
+.claude/

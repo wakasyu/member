@@ -8,9 +8,11 @@
 // service_role権限が必要な auth.admin.createUser をクライアントから
 // 直接呼ばせるわけにはいかないため、その処理をここに閉じ込める。
 //
-// 認証はJWTではなく、トークン自体（推測不可能な長いランダム文字列で
-// 1回だけ有効）で行う。招待されていない相手はmember_invitesテーブルの
-// tokenが一致しないため何もできない。
+// 認証はJWTではなく、トークン自体（推測不可能な長いランダム文字列）で行う。
+// 招待されていない相手はmember_invitesテーブルのtokenが一致しないため
+// 何もできない。2026-08-10に「1回限り」から「管理者が無効化するまで
+// 何度でも使える」方式に変更した（1つのリンクをグループへまとめて配り、
+// 複数人に使ってもらう運用のため）。有効・無効はrevoked_atで判定する。
 //
 // GET  ?token=xxx  … 招待の有効性確認用
 // POST { token, email, name, shortName, contact, birthDate, costumeSize, tshirtSize }
@@ -94,12 +96,12 @@ Deno.serve(async (req) => {
 
     const { data: invite } = await supabase
       .from("member_invites")
-      .select("used_at")
+      .select("revoked_at")
       .eq("token", token)
       .maybeSingle();
 
     if (!invite) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
-    if (invite.used_at) return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
+    if (invite.revoked_at) return jsonResponse({ error: "このリンクは無効化されています。管理者に新しいリンクを発行してもらってください。" }, 400);
     return jsonResponse({ ok: true });
   }
 
@@ -123,34 +125,13 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "電話番号は「090-1234-5678」のようにハイフン区切りで入力してください。" }, 400);
   }
 
-  const { data: precheck } = await supabase
+  const { data: invite } = await supabase
     .from("member_invites")
-    .select("used_at")
+    .select("*")
     .eq("token", token)
     .maybeSingle();
-  if (!precheck) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
-  if (precheck.used_at) return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
-
-  // トークンを条件付きupdateで先に「使用済み」にすることで排他確保する
-  // （select→後で更新、という順序だと同時に2回POSTされた場合に両方とも
-  // used_atチェックを通過してしまい二重登録が起きうるため）。
-  // 以降のどこかで失敗した場合は、この確保を解除して同じリンクをもう一度
-  // 使えるように戻す。
-  const { data: invite, error: claimError } = await supabase
-    .from("member_invites")
-    .update({ used_at: new Date().toISOString() })
-    .eq("token", token)
-    .is("used_at", null)
-    .select()
-    .single();
-
-  if (claimError || !invite) {
-    return jsonResponse({ error: "このリンクはすでに登録済みです。" }, 400);
-  }
-
-  async function releaseInviteClaim() {
-    await supabase.from("member_invites").update({ used_at: null }).eq("id", invite.id);
-  }
+  if (!invite) return jsonResponse({ error: "招待リンクが無効です。管理者に確認してください。" }, 400);
+  if (invite.revoked_at) return jsonResponse({ error: "このリンクは無効化されています。管理者に新しいリンクを発行してもらってください。" }, 400);
 
   const { data: member, error: memberError } = await supabase
     .from("members")
@@ -166,7 +147,6 @@ Deno.serve(async (req) => {
     .single();
 
   if (memberError || !member) {
-    await releaseInviteClaim();
     const message = (memberError?.message || "").toLowerCase().includes("duplicate")
       ? "同じ名前のメンバーが既に登録されています。管理者に確認してください。"
       : `メンバー登録に失敗しました：${memberError?.message || "unknown error"}`;
@@ -184,7 +164,6 @@ Deno.serve(async (req) => {
   if (createError || !created?.user) {
     // アカウント作成に失敗した場合、作りかけのメンバー行を残さない
     await supabase.from("members").delete().eq("id", member.id);
-    await releaseInviteClaim();
     const message = (createError?.message || "").toLowerCase().includes("already")
       ? "このメールアドレスはすでに登録されています。"
       : `アカウント作成に失敗しました：${createError?.message || "unknown error"}`;
@@ -202,10 +181,14 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: `プロフィール作成に失敗しました：${profileError.message}` }, 500);
   }
 
-  await supabase
-    .from("member_invites")
-    .update({ created_member_id: member.id })
-    .eq("id", invite.id);
+  // used_atはもう有効・無効の判定には使わない（何度でも使える）。
+  // 「最初にいつ使われたか」の参考情報として、初回だけ記録しておく。
+  if (!invite.used_at) {
+    await supabase
+      .from("member_invites")
+      .update({ used_at: new Date().toISOString() })
+      .eq("id", invite.id);
+  }
 
   await supabase.from("logs").insert({
     action: "メンバー本人登録",

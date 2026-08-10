@@ -402,9 +402,13 @@
 
         <div class="panel-inset">
           <div class="panel-head"><h3>新規メンバー登録リンク</h3></div>
-          <p class="muted">発行すると、新しく入る人がリンクを開いて名前・連絡先・メールアドレスを自分で入力するだけで、メンバー登録とアカウント作成まで完了できます（事前にここへ何か入力しておく必要はありません）。</p>
+          <p class="muted">発行すると、新しく入る人がリンクを開いて名前・連絡先・メールアドレスを自分で入力するだけで、メンバー登録とアカウント作成まで完了できます（事前にここへ何か入力しておく必要はありません）。1つのリンクを複数人に配って、それぞれ登録してもらうことができます（無効化するまで何度でも使えます）。</p>
           <button type="button" onclick="issueNewMemberInviteLink(this)">登録リンクを発行</button>
           <div id="newMemberInviteMessage" class="message" role="status" aria-live="polite"></div>
+          <div id="activeInviteListWrap" class="hidden">
+            <p class="muted" style="margin-top:12px;">発行済みで、まだ無効化していないリンク一覧</p>
+            <div id="activeInviteList" class="invite-list"></div>
+          </div>
         </div>
 
         <div class="panel-head"><h3>基本情報</h3></div>

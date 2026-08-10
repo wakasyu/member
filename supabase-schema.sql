@@ -438,6 +438,28 @@ create table if not exists public.member_invites (
 
 grant select, insert, update, delete on public.member_invites to authenticated;
 
+-- 招待リンクを「1回限り」から「管理者が無効化するまで何度でも使える」方式に
+-- 変更（2026-08-10）。1つのリンクをグループへまとめて配り、複数人に使って
+-- もらう運用に合わせるため。used_atは初回登録日時の参考情報として残すのみで、
+-- 以後は使用回数を制限しない。有効・無効の判定はrevoked_atで行う
+-- （nullなら使える、日時が入っていれば無効）。
+-- 移行時点で既に発行されていたリンク（過去のテスト用や使用済みのものを含む）が
+-- この「無期限で使える」新仕様のもとで予期せず有効になってしまわないよう、
+-- 一括で無効化しておく。この一括無効化はrevoked_at列がまだ無かった場合にだけ
+-- 実行されるので、このSQLを繰り返し実行しても新しく発行したリンクまで
+-- 無効化されることはない。
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'member_invites' and column_name = 'revoked_at'
+  ) then
+    alter table public.member_invites add column revoked_at timestamptz null;
+    update public.member_invites set revoked_at = now() where revoked_at is null;
+  end if;
+end;
+$$;
+
 alter table public.profiles enable row level security;
 alter table public.members enable row level security;
 alter table public.events enable row level security;

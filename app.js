@@ -1737,12 +1737,72 @@ async function issueNewMemberInviteLink(buttonEl) {
     return;
   }
   const url = createRegisterUrl(token);
-  showMessage('newMemberInviteMessage', '登録リンクを発行しました。', true);
+  showMessage('newMemberInviteMessage', '登録リンクを発行しました。無効化するまで何度でも使えます。', true);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(() => flashButtonText(buttonEl, 'コピーしました')).catch(() => showSharePrompt(url));
   } else {
     showSharePrompt(url);
   }
+  loadActiveInvites();
+}
+
+// 発行済みで、まだ無効化していない（＝今も使える）招待リンクの一覧。
+// 管理画面「メンバー追加」タブを開くたびと、新規発行のたびに読み込み直す。
+async function loadActiveInvites() {
+  if (!isAdmin()) return;
+  const wrap = document.getElementById('activeInviteListWrap');
+  const list = document.getElementById('activeInviteList');
+  if (!wrap || !list) return;
+  const { data, error } = await supabaseClient
+    .from('member_invites')
+    .select('id, token, created_at, used_at')
+    .is('revoked_at', null)
+    .order('created_at', { ascending: false });
+  if (error || !data || !data.length) {
+    wrap.classList.add('hidden');
+    list.innerHTML = '';
+    return;
+  }
+  wrap.classList.remove('hidden');
+  list.innerHTML = data.map(invite => {
+    const created = formatDateTime(invite.created_at);
+    const usedNote = invite.used_at ? `・${formatDateTime(invite.used_at)}に最初の登録あり` : '・まだ未使用';
+    return `
+      <div class="invite-list-row">
+        <div class="invite-list-info">
+          <span class="muted">発行日：${escapeHtml(created)}${escapeHtml(usedNote)}</span>
+        </div>
+        <div class="invite-list-actions">
+          <button type="button" onclick="copyInviteLink('${escapeAttr(invite.token)}', this)">リンクをコピー</button>
+          <button type="button" class="danger" onclick="revokeInviteLink('${escapeAttr(invite.id)}')">無効にする</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// トークン自体を渡し、URLはここで組み立てる（onclick属性に生のURLを
+// 直接埋め込むとURL中の記号がHTML属性の引用符と衝突しうるため）
+function copyInviteLink(token, buttonEl) {
+  const url = createRegisterUrl(token);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => flashButtonText(buttonEl, 'コピーしました')).catch(() => showSharePrompt(url));
+  } else {
+    showSharePrompt(url);
+  }
+}
+
+async function revokeInviteLink(inviteId) {
+  if (!isAdmin()) return;
+  if (!confirm('このリンクを無効にします。以後このリンクからは登録できなくなります。よろしいですか？')) return;
+  const { error } = await supabaseClient
+    .from('member_invites')
+    .update({ revoked_at: new Date().toISOString() })
+    .eq('id', inviteId);
+  if (error) {
+    showMessage('newMemberInviteMessage', error.message, false);
+    return;
+  }
+  loadActiveInvites();
 }
 
 async function deleteMember(memberId) {
@@ -2461,6 +2521,7 @@ function renderTopHighlights() {
 function switchAdminTab(name) {
   document.querySelectorAll('.subtab').forEach(tab => tab.classList.toggle('active', tab.dataset.adminTab === name));
   document.querySelectorAll('.admin-section').forEach(section => section.classList.toggle('active', section.dataset.adminSection === name));
+  if (name === 'memberForm') loadActiveInvites();
 }
 
 function fillSelect(id, items, placeholder) {
