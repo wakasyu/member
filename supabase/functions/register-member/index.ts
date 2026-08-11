@@ -200,7 +200,20 @@ Deno.serve(async (req) => {
     detail: `email: ${email}`,
   });
 
-  await sendWelcomeEmail(email, name);
+  // メール送信（Gmail SMTP）は毎回2〜3秒ほどかかることが分かっており、
+  // これをawaitして応答をブロックすると、ブラウザ側のfetchが接続を
+  // 諦めて「Failed to fetch」になってしまう（サーバー側の登録処理自体は
+  // 成功しているのに、本人には失敗したように見える）。そのため応答は
+  // 先に返し、メール送信はEdgeRuntime.waitUntil()でバックグラウンドの
+  // まま完走させる（awaitしてしまうとFunctionの応答と一緒に打ち切られる）。
+  const emailTask = sendWelcomeEmail(email, name);
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (runtime?.waitUntil) {
+    runtime.waitUntil(emailTask);
+  } else {
+    // waitUntilが使えない環境向けのフォールバック（ベストエフォート）
+    emailTask.catch(() => {});
+  }
 
   return jsonResponse({ ok: true });
 });
