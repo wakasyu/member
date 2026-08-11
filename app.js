@@ -1,5 +1,11 @@
 const STATUS_LIST = ['参加', '不参加', '未定', '時間限定', '未回答'];
 
+// メンバー自己登録時の初期パスワード（固定値）。register-member Edge
+// Functionの同名定数と必ず一致させること。ログイン直後にmust_change_password
+// で強制的にパスワード変更画面へ誘導するため、この値のまま使い続けられる
+// ことはない。
+const INITIAL_PASSWORD = 'wakashu2026';
+
 // 電話番号の入力チェック。ハイフンは必須にしない（スマホの電話番号用
 // キーパッドはハイフンキーが押しにくく、数字だけ打てた方が楽なため）。
 // ハイフンや空白を含んでいても構わないが、それらを取り除いた残りが
@@ -283,12 +289,9 @@ async function submitRegisterForm(event) {
       })
     });
     document.getElementById('registerForm').classList.add('hidden');
-    // パスワードはこのレスポンス（登録した本人の画面）にしか出てこない値。
-    // メール未設定の環境でもこれで必ず初期パスワードを確認できるようにする。
-    const passwordNotice = result && result.password
-      ? `初期パスワードは「${result.password}」です（このパスワードは他の人に共有しないでください）。`
-      : '設定されたメールアドレス宛てに初期パスワードを送信しました。';
-    showMessage('registerMessage', `登録が完了しました。${passwordNotice}ログイン後、パスワード変更画面が表示されます。`, true);
+    // 初期パスワードは固定値（INITIAL_PASSWORD）なので、このレスポンスが
+    // 正常に返ってこなかった場合でも本人は最初から値を知っている。
+    showMessage('registerMessage', `登録が完了しました。初期パスワードは「${INITIAL_PASSWORD}」です。ログイン後、パスワード変更画面が表示されます。`, true);
     document.getElementById('registerGoToLoginButton').classList.remove('hidden');
   } catch (error) {
     showMessage('registerMessage', error.message, false);

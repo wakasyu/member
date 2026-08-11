@@ -28,22 +28,22 @@ const GMAIL_APP_PASSWORD = Deno.env.get("GMAIL_APP_PASSWORD") ?? "";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-// 固定パスワード"password"は誰でも知っている値になってしまう
-// （README/画面文言にも書かざるを得ないため）ため、登録の都度ランダムな
-// パスワードを発行する。本人以外に見せてよい値ではないため、返す先は
-// 登録した本人のブラウザ（このリクエストのレスポンス）とメール本文のみ。
-function generatePassword(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-  const bytes = new Uint8Array(12);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
-}
+// 2026-08-11：登録の都度ランダムなパスワードを発行する方式から、
+// 固定の初期パスワードに戻した。ランダム方式は、生成したパスワードを
+// 本人に渡す経路が「このリクエストのレスポンス」と「メール」の2つしか
+// 無く、DBのどこにも残らないため、両方失敗すると本人が完全にパスワードを
+// 知りようがなくなる（かつ名前・メールが登録済み扱いになり登録し直しも
+// できない）という詰みが起きた。固定パスワードなら、レスポンスやメールが
+// 届かなくても本人は最初から知っている値でログインできる。
+// ログイン直後にmust_change_passwordで強制的にパスワード変更画面へ
+// 誘導するため、この固定値のまま使い続けられることはない。
+const INITIAL_PASSWORD = "wakashu2026";
 
 // 登録メール送信に失敗しても登録自体は完了させたいので、呼び出し側では
 // awaitするが例外は投げない（内部でcatchする）。
 // GmailのSMTP（アプリパスワード認証）経由で送るので、Resendのような
 // 送信ドメイン未認証時の宛先制限を受けず、本人のメールアドレス宛に届く。
-async function sendWelcomeEmail(to: string, name: string, password: string) {
+async function sendWelcomeEmail(to: string, name: string) {
   if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return;
   const client = new SMTPClient({
     connection: {
@@ -61,7 +61,7 @@ async function sendWelcomeEmail(to: string, name: string, password: string) {
       from: GMAIL_USER,
       to,
       subject: "[若衆] 登録が完了しました！",
-      content: `${name}さん\n\n登録が完了しました！これから若衆として一緒に頑張っていきましょう！\n\n下記でログインできます。\nメールアドレス：${to}\n初期パスワード：${password}\n\n※このパスワードは他の人に共有しないでください。ログイン直後にパスワード変更画面が表示されるので、必ずご自身のパスワードに変更してください。`,
+      content: `${name}さん\n\n登録が完了しました！これから若衆として一緒に頑張っていきましょう！\n\n下記でログインできます。\nメールアドレス：${to}\n初期パスワード：${INITIAL_PASSWORD}\n\n※ログイン直後にパスワード変更画面が表示されるので、必ずご自身のパスワードに変更してください。`,
     });
   } catch (error) {
     console.error("welcome email error", error);
@@ -157,10 +157,9 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: message }, 400);
   }
 
-  const generatedPassword = generatePassword();
   const { data: created, error: createError } = await supabase.auth.admin.createUser({
     email,
-    password: generatedPassword,
+    password: INITIAL_PASSWORD,
     email_confirm: true,
     user_metadata: { must_change_password: true },
   });
@@ -201,10 +200,7 @@ Deno.serve(async (req) => {
     detail: `email: ${email}`,
   });
 
-  await sendWelcomeEmail(email, name, generatedPassword);
+  await sendWelcomeEmail(email, name);
 
-  // パスワードをレスポンスに含めるのは、登録した本人が見ている
-  // このリクエストの結果画面だけ（他人には見えない）。メール未設定の
-  // 環境でもこれで初期パスワードを必ず本人が確認できるようにする。
-  return jsonResponse({ ok: true, password: generatedPassword });
+  return jsonResponse({ ok: true });
 });
