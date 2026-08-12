@@ -1756,6 +1756,30 @@ async function toggleEventVisibility(eventId) {
   await refreshAll();
 }
 
+// 「終了した予定」（開催日が今日より前）を1件ずつではなくまとめて非表示にする。
+// 削除済み・すでに非表示のものは対象外
+async function hidePastEventsBulk() {
+  if (!isAdmin()) return;
+  const targets = publicData.events.filter(event =>
+    isPastEvent(event) && event.publicState !== '削除' && event.visible !== false
+  );
+  if (!targets.length) {
+    alert('非表示にする終了済みの予定はありません。');
+    return;
+  }
+  if (!confirm(`終了した予定 ${targets.length}件をまとめて非表示にします。よろしいですか？（個別に「表示に戻す」こともできます）`)) return;
+  const { error } = await supabaseClient
+    .from('events')
+    .update({ visible: false, updated_at: new Date().toISOString() })
+    .in('id', targets.map(event => event.eventId));
+  if (error) {
+    alert(error.message);
+    return;
+  }
+  await appendLog('終了した予定をまとめて非表示にする', '', '', '', '', '', '', `${targets.length}件`);
+  await refreshAll();
+}
+
 function renderAdminMembers() {
   const showAllCheckbox = document.getElementById('showAllMemberColumns');
   const showAll = showAllCheckbox ? showAllCheckbox.checked : false;
