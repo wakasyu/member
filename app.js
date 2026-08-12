@@ -808,7 +808,7 @@ function updatePublicToolbarVisibility(mode) {
 
 function getFilteredPublicEvents(filters) {
   return publicData.events
-    .filter(event => event.publicState !== '削除' && event.visible !== false)
+    .filter(event => event.publicState !== '削除')
     .filter(event => filters.showPast || !isPastEvent(event))
     .filter(event => !filters.category || event.category === filters.category)
     .filter(event => {
@@ -1210,7 +1210,7 @@ function populateAnswerEventSelect() {
   if (!select) return;
   const memberId = currentProfile ? currentProfile.member_id : null;
   const events = publicData.events
-    .filter(event => event.publicState !== '削除' && event.visible !== false)
+    .filter(event => event.publicState !== '削除')
     .filter(event => canProxyOthers() || !memberId || (event.answers || []).some(answer => answer.memberId === memberId))
     .sort(compareEvents);
   fillSelect('answerEventSelect', events.map(event => ({ value: event.answerToken, label: `[${event.category || 'その他'}] ${formatDate(event.date)} ${event.eventName}` })), '予定を選択してください');
@@ -1437,7 +1437,6 @@ function setupAdminTables() {
   if (adminTablesBound) return;
   adminTablesBound = true;
   document.getElementById('adminEvents').addEventListener('click', handleAdminEventsClick);
-  document.getElementById('adminEvents').addEventListener('change', handleAdminEventsChange);
   document.getElementById('adminMembers').addEventListener('click', handleAdminMembersClick);
   document.getElementById('eventList').addEventListener('click', handlePublicListClick);
   document.getElementById('eventList').addEventListener('keydown', (domEvent) => {
@@ -1465,11 +1464,6 @@ function handleAdminEventsClick(domEvent) {
   else if (deleteButton) deleteEvent(deleteButton.dataset.deleteEvent);
   else if (restoreButton) restoreEvent(restoreButton.dataset.restoreEvent);
   else if (copyButton) copyShareText(copyButton.dataset.copyShare, copyButton);
-}
-
-function handleAdminEventsChange(domEvent) {
-  const visibilityCheckbox = domEvent.target.closest('[data-toggle-event-visible]');
-  if (visibilityCheckbox) toggleEventVisibility(visibilityCheckbox.dataset.toggleEventVisible, visibilityCheckbox.checked);
 }
 
 function handleAdminMembersClick(domEvent) {
@@ -1716,49 +1710,27 @@ function renderAdminEvents() {
   // メンバー向け予定一覧の「終了した予定を表示する」と同じ考え方のフィルター
   const pastCheckbox = document.getElementById('showPastAdminEvents');
   const showPast = pastCheckbox ? pastCheckbox.checked : false;
-  // 非表示の予定も一覧には常に出す。表示するかどうかは行ごとのチェックボックスで切り替える
   const events = publicData.events
     .filter(event => showArchived || event.publicState !== '削除')
     .filter(event => showPast || !isPastEvent(event));
   const rows = events.map(event => {
     const isArchived = event.publicState === '削除';
-    const isHidden = event.visible === false;
-    const visibilityCheckbox = isArchived
-      ? ''
-      : `<label class="inline-check"><input type="checkbox" data-toggle-event-visible="${escapeAttr(event.eventId)}" ${isHidden ? '' : 'checked'}> 表示</label>`;
     const actionButtons = isArchived
       ? `<button type="button" data-restore-event="${escapeAttr(event.eventId)}">復元</button>`
       : `<button type="button" data-edit-event="${escapeAttr(event.eventId)}">編集</button> <button class="danger" type="button" data-delete-event="${escapeAttr(event.eventId)}">削除</button>`;
     return `
-    <tr class="${isArchived ? 'is-archived' : ''}${isHidden ? ' is-hidden-row' : ''}">
+    <tr class="${isArchived ? 'is-archived' : ''}">
       <td data-label="状態">${escapeHtml(event.publicState)}</td>
       <td data-label="分類">${escapeHtml(event.category)}</td>
       <td class="wrap" data-label="予定名">${escapeHtml(event.eventName)}</td>
       <td data-label="日付">${escapeHtml(formatDate(event.date))}</td>
       <td data-label="時間">${escapeHtml([event.startTime, event.endTime].filter(Boolean).join(' - '))}</td>
       <td class="wrap" data-label="日程調整リンク"><div class="share-actions"><a href="${escapeAttr(event.answerUrl)}" target="_blank" rel="noopener noreferrer">日程調整リンク</a><button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button></div></td>
-      <td data-label="表示">${visibilityCheckbox}</td>
       <td data-label="操作">${actionButtons}</td>
     </tr>
   `;
   }).join('');
-  document.getElementById('adminEvents').innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>分類</th><th>予定名</th><th>日付</th><th>時間</th><th>日程調整リンク</th><th>表示</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="8">予定がありません。</td></tr>'}</tbody></table></div>`;
-}
-
-// 予定を「非表示」にする＝削除はせず、一般メンバー向けの表示（予定一覧・
-// トップの次の予定・出欠回答の選択肢）からだけ外す。members.visibleと
-// 同じ考え方（在籍状態＝public_stateとは別軸のトグル）。一覧のチェックボックスで直接切り替える
-async function toggleEventVisibility(eventId, nextVisible) {
-  if (!isAdmin()) return;
-  const event = publicData.events.find(item => item.eventId === eventId);
-  if (!event) return;
-  const { error } = await supabaseClient.from('events').update({ visible: nextVisible, updated_at: new Date().toISOString() }).eq('id', eventId);
-  if (error) {
-    alert(error.message);
-    return;
-  }
-  await appendLog(nextVisible ? '予定を表示に戻す' : '予定を非表示にする', eventId, event.eventName, '', '', '', '', '');
-  await refreshAll();
+  document.getElementById('adminEvents').innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>分類</th><th>予定名</th><th>日付</th><th>時間</th><th>日程調整リンク</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="7">予定がありません。</td></tr>'}</tbody></table></div>`;
 }
 
 function renderAdminMembers() {
@@ -2691,7 +2663,7 @@ function renderTopHighlights() {
   pendingBox.classList.remove('hidden');
 
   const upcoming = publicData.events
-    .filter(event => event.publicState !== '削除' && event.visible !== false && !isPastEvent(event))
+    .filter(event => event.publicState !== '削除' && !isPastEvent(event))
     .sort(compareEvents);
   const next = upcoming[0];
   nextBox.classList.toggle('clickable', Boolean(next));
@@ -2898,7 +2870,6 @@ function normalizeEvent(row) {
     note: row.note || '',
     answerToken: row.answer_token || '',
     publicState: row.public_state || '公開',
-    visible: row.visible !== false,
     createdAt: row.created_at || '',
     updatedAt: row.updated_at || ''
   };

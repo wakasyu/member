@@ -1209,10 +1209,6 @@ tr.is-archived {
   opacity: .6;
 }
 
-tr.is-hidden-row {
-  opacity: .75;
-}
-
 td.wrap {
   min-width: 180px;
   white-space: normal;
