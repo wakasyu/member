@@ -359,14 +359,17 @@ async function enterApp(user) {
   document.getElementById('appShell').classList.remove('hidden');
   updateUserMetaLabel();
   renderAdminModeSwitcher();
-  // スタッフも「管理」タブは見えるが、中のサブタブは「メンバー一覧」
-  // （閲覧のみ）と「日程アンケート」（作成・編集・削除）だけに絞る
-  document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel() && !isStaff());
+  // 「管理」タブ自体はスタッフには出さず、代わりに中身（メンバー一覧の
+  // 閲覧・日程アンケートの作成管理）を独立したタブとして直接見せる
+  document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
   document.getElementById('eventFormTabButton').classList.toggle('hidden', !isStaff());
+  document.getElementById('staffMemberListTabButton').classList.toggle('hidden', !isStaff());
+  document.getElementById('staffPollsTabButton').classList.toggle('hidden', !isStaff());
   if (isStaff()) {
-    document.querySelectorAll('.subtab').forEach(tab => {
-      tab.classList.toggle('hidden', !STAFF_ADMIN_SUBTABS.includes(tab.dataset.adminTab));
-    });
+    // 管理画面内のサブタブ切替バーは、スタッフには独立タブとして
+    // 出しているぶん不要なので隠す（中身のパネルはそのまま使う）
+    const subtabsNav = document.querySelector('.subtabs');
+    if (subtabsNav) subtabsNav.classList.add('hidden');
   }
   ['top', 'answer', 'poll'].forEach(name => {
     const tabButton = document.querySelector(`.tab[data-tab="${name}"]`);
@@ -2313,13 +2316,21 @@ async function appendLog(action, eventId, eventName, memberId, memberName, oldSt
   });
 }
 
+// スタッフ向けの「メンバー一覧」「日程アンケート」タブは、内部的には
+// 管理画面（adminView）の該当サブタブをそのまま開く形にしている
+// （「管理」タブそのものはスタッフには見せず、必要な2画面だけを
+// 独立タブとして直接見せるため）
+const STAFF_TAB_TO_ADMIN_SUBTAB = { staffMemberList: 'memberList', staffPolls: 'polls' };
+
 function switchView(name) {
-  if (name === 'admin' && !canAccessAdminPanel() && !isStaff()) return;
+  const targetSubtab = STAFF_TAB_TO_ADMIN_SUBTAB[name];
+  const viewName = targetSubtab ? 'admin' : name;
+  if (viewName === 'admin' && !canAccessAdminPanel() && !isStaff()) return;
   if (name === 'eventForm' && !isStaff()) return;
   if (isStaff() && ['top', 'answer', 'poll'].includes(name)) return;
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
   document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
-  document.getElementById(`${name}View`).classList.add('active');
+  document.getElementById(`${viewName}View`).classList.add('active');
   document.body.classList.toggle('top-active', name === 'top');
   const backdrop = document.getElementById('topPhotoBackdrop');
   if (backdrop) backdrop.classList.toggle('hidden', name !== 'top');
@@ -2333,9 +2344,10 @@ function switchView(name) {
   updateFloatingUiClearance(showsAnswerBar);
   if (name === 'poll') initPollView();
   if (name === 'guide') renderGuideView();
-  // スタッフが「管理」を開いた時、既定でアクティブなサブタブ（予定一覧）は
-  // スタッフには見えないため、見える最初のサブタブに切り替えておく
-  if (name === 'admin' && isStaff() && !STAFF_ADMIN_SUBTABS.includes(getActiveAdminSubtab())) {
+  if (targetSubtab) {
+    switchAdminTab(targetSubtab);
+  } else if (name === 'admin' && isStaff() && !STAFF_ADMIN_SUBTABS.includes(getActiveAdminSubtab())) {
+    // 管理者がスタッフ表示モードなどで直接admin viewに来た場合の保険
     switchAdminTab(STAFF_ADMIN_SUBTABS[0]);
   }
 }

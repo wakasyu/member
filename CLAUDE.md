@@ -42,10 +42,17 @@
 - **staff（政やスタッフ）**：個別アカウントではなく、スタッフ全員共通の
   1つのSupabaseアカウント（固定メールアドレス＋共通パスワード）でログイン。
   ログイン時に入力した名前がそのセッション中「作成者」欄に自動入力される。
-  見えるのは「予定一覧」「予定追加」タブに加え、2026-08-12から「管理」タブの
-  うち「メンバー一覧」（閲覧のみ）「日程アンケート」（作成・編集・削除）。
-  それ以外の管理サブタブ（メンバー追加・ログ・分類管理・トップ写真・
-  予定一覧の管理者用CRUD）は非表示のまま。実装は`canManagePolls()`
+  見えるのは「予定一覧」「予定追加」タブに加え、2026-08-12から
+  「メンバー一覧」（閲覧のみ）「日程アンケート」（作成・編集・削除）タブ。
+  この2つは中身としては管理画面（`adminView`）の`memberList`/`polls`
+  サブタブをそのまま使っているが、「管理」タブ自体（`adminTabButton`）は
+  スタッフには出さず、独立タブ（`staffMemberListTabButton`/
+  `staffPollsTabButton`、クリックで`switchView('staffMemberList'/'staffPolls')`
+  → 内部で`adminView`を表示しつつ`switchAdminTab('memberList'/'polls')`）
+  として直接開く形にしている（`STAFF_TAB_TO_ADMIN_SUBTAB`）。管理画面内の
+  サブタブ切替バー（`.subtabs`）自体もスタッフには不要なので丸ごと隠す。
+  それ以外の管理機能（メンバー追加・ログ・分類管理・トップ写真・
+  予定一覧の管理者用CRUD）は表示されない。実装は`canManagePolls()`
   （`isAdmin() || isStaff()`）と`STAFF_ADMIN_SUBTABS`（`['memberList','polls']`）
   で分岐し、RLSも`availability_polls`/`availability_poll_days`の書き込みポリシーを
   `is_admin() or is_staff()`に緩和済み（`members`テーブルはRLS上は元々
