@@ -404,6 +404,7 @@
       <section class="panel admin-section active" data-admin-section="eventList">
         <h2>予定一覧・日程調整リンク</h2>
         <div class="button-row">
+          <label class="inline-check"><input id="showPastAdminEvents" type="checkbox" onchange="renderAdminEvents()"> 終了した予定を表示する</label>
           <label class="inline-check"><input id="showArchivedEvents" type="checkbox" onchange="renderAdminEvents()"> 削除済みも表示する</label>
           <button type="button" onclick="startAddEvent()">予定を追加</button>
         </div>

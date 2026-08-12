@@ -1713,8 +1713,13 @@ function renderAdmin() {
 function renderAdminEvents() {
   const archiveCheckbox = document.getElementById('showArchivedEvents');
   const showArchived = archiveCheckbox ? archiveCheckbox.checked : false;
+  // メンバー向け予定一覧の「終了した予定を表示する」と同じ考え方のフィルター
+  const pastCheckbox = document.getElementById('showPastAdminEvents');
+  const showPast = pastCheckbox ? pastCheckbox.checked : false;
   // 非表示の予定も一覧には常に出す。表示するかどうかは行ごとのチェックボックスで切り替える
-  const events = publicData.events.filter(event => showArchived || event.publicState !== '削除');
+  const events = publicData.events
+    .filter(event => showArchived || event.publicState !== '削除')
+    .filter(event => showPast || !isPastEvent(event));
   const rows = events.map(event => {
     const isArchived = event.publicState === '削除';
     const isHidden = event.visible === false;
