@@ -359,8 +359,15 @@ async function enterApp(user) {
   document.getElementById('appShell').classList.remove('hidden');
   updateUserMetaLabel();
   renderAdminModeSwitcher();
-  document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel());
+  // スタッフも「管理」タブは見えるが、中のサブタブは「メンバー一覧」
+  // （閲覧のみ）と「日程アンケート」（作成・編集・削除）だけに絞る
+  document.getElementById('adminTabButton').classList.toggle('hidden', !canAccessAdminPanel() && !isStaff());
   document.getElementById('eventFormTabButton').classList.toggle('hidden', !isStaff());
+  if (isStaff()) {
+    document.querySelectorAll('.subtab').forEach(tab => {
+      tab.classList.toggle('hidden', !STAFF_ADMIN_SUBTABS.includes(tab.dataset.adminTab));
+    });
+  }
   ['top', 'answer', 'poll'].forEach(name => {
     const tabButton = document.querySelector(`.tab[data-tab="${name}"]`);
     if (tabButton) tabButton.classList.toggle('hidden', isStaff());
@@ -420,6 +427,16 @@ function canAccessAdminPanel() {
 function canProxyOthers() {
   return isAdmin() && adminViewMode === 'edit';
 }
+
+// 2026-08-12：日程アンケートの作成・編集・削除は管理者に加えて
+// 政やスタッフも行える（管理画面の「日程アンケート」タブをスタッフにも開放）
+function canManagePolls() {
+  return isAdmin() || isStaff();
+}
+
+// スタッフに開放している管理画面のサブタブ（メンバー一覧の閲覧・
+// 日程アンケートの作成管理のみ。それ以外は管理者専用のまま）
+const STAFF_ADMIN_SUBTABS = ['memberList', 'polls'];
 
 function setAdminViewMode(mode) {
   if (!isAdmin()) return;
@@ -666,7 +683,7 @@ async function loadPublicData() {
   renderPublic();
   populateAnswerEventSelect();
   renderTopHighlights();
-  if (isAdmin()) renderAdmin();
+  if (isAdmin() || isStaff()) renderAdmin();
 }
 
 // 保留中の出欠回答（inlineAnswerPendingChanges）をDBへ問い合わせ直さずに
@@ -676,7 +693,7 @@ function rebuildPublicEvents() {
   renderPublic();
   populateAnswerEventSelect();
   renderTopHighlights();
-  if (isAdmin()) renderAdmin();
+  if (isAdmin() || isStaff()) renderAdmin();
 }
 
 async function manualRefresh() {
@@ -1670,14 +1687,18 @@ function handleOptionRemoveClick(domEvent) {
 }
 
 function renderAdmin() {
-  if (!canAccessAdminPanel()) return;
-  renderAdminEvents();
+  if (!canAccessAdminPanel() && !isStaff()) return;
+  // スタッフは「メンバー一覧」「日程アンケート」しか見えないので、
+  // それ以外のサブタブは管理者の時だけ描画する
+  if (canAccessAdminPanel()) {
+    renderAdminEvents();
+    renderAdminLogs();
+    renderOptionManager();
+    renderTopPhotoManager();
+    renderEventTargetMemberList();
+  }
   renderAdminMembers();
-  renderAdminLogs();
-  renderOptionManager();
-  renderTopPhotoManager();
   renderAdminPolls();
-  renderEventTargetMemberList();
 }
 
 function renderAdminEvents() {
@@ -1707,6 +1728,8 @@ function renderAdminEvents() {
 function renderAdminMembers() {
   const showAllCheckbox = document.getElementById('showAllMemberColumns');
   const showAll = showAllCheckbox ? showAllCheckbox.checked : false;
+  // 政やスタッフはメンバー一覧を閲覧のみ（並び替え・編集・削除は不可）
+  const readOnly = isStaff();
   const ordered = publicData.members;
   const rows = ordered.map((member, index) => {
     const age = computeAge(member.birthDate);
@@ -1722,25 +1745,31 @@ function renderAdminMembers() {
       <td data-label="Tシャツ">${escapeHtml(member.tshirtSize || '')}</td>
       <td class="wrap" data-label="備考">${escapeHtml(member.note || '')}</td>
     ` : '';
-    return `
-    <tr>
+    const orderCell = readOnly ? '' : `
       <td data-label="順"><div class="order-buttons">
         <button type="button" data-move-member-up="${escapeAttr(member.memberId)}" ${index === 0 ? 'disabled' : ''} title="上へ">▲</button>
         <button type="button" data-move-member-down="${escapeAttr(member.memberId)}" ${index === ordered.length - 1 ? 'disabled' : ''} title="下へ">▼</button>
-      </div></td>
+      </div></td>`;
+    const actionCell = readOnly ? '' : `
+      <td data-label="操作"><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button> <button type="button" class="danger" data-delete-member="${escapeAttr(member.memberId)}">削除</button></td>`;
+    return `
+    <tr>
+      ${orderCell}
       <td data-label="表示">${escapeHtml(member.visible ? '表示' : '非表示')}</td>
       <td data-label="状態">${escapeHtml(member.memberState)}</td>
       <td data-label="氏名">${escapeHtml(member.name)}</td>
       <td class="wrap" data-label="電話番号">${escapeHtml(member.contact || '')}</td>
       <td data-label="担当">${escapeHtml(member.duty || '')}</td>
       ${detailCells}
-      <td data-label="操作"><button type="button" data-edit-member="${escapeAttr(member.memberId)}">編集</button> <button type="button" class="danger" data-delete-member="${escapeAttr(member.memberId)}">削除</button></td>
+      ${actionCell}
     </tr>
   `;
   }).join('');
   const detailHeaders = showAll ? '<th>表示名</th><th>生年月日</th><th>入会日</th><th>退会日</th><th>袴</th><th>Tシャツ</th><th>備考</th>' : '';
-  const colCount = showAll ? 14 : 7;
-  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr><th>順</th><th>表示</th><th>状態</th><th>氏名</th><th>電話番号</th><th>担当</th>${detailHeaders}<th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
+  const orderHeader = readOnly ? '' : '<th>順</th>';
+  const actionHeader = readOnly ? '' : '<th>操作</th>';
+  const colCount = (readOnly ? 5 : 7) + (showAll ? 7 : 0);
+  document.getElementById('adminMembers').innerHTML = `<div class="table-wrap"><table><thead><tr>${orderHeader}<th>表示</th><th>状態</th><th>氏名</th><th>電話番号</th><th>担当</th>${detailHeaders}${actionHeader}</tr></thead><tbody>${rows || `<tr><td colspan="${colCount}">メンバーがいません。</td></tr>`}</tbody></table></div>`;
 }
 
 function generateInviteToken() {
@@ -2285,7 +2314,7 @@ async function appendLog(action, eventId, eventName, memberId, memberName, oldSt
 }
 
 function switchView(name) {
-  if (name === 'admin' && !canAccessAdminPanel()) return;
+  if (name === 'admin' && !canAccessAdminPanel() && !isStaff()) return;
   if (name === 'eventForm' && !isStaff()) return;
   if (isStaff() && ['top', 'answer', 'poll'].includes(name)) return;
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
@@ -2304,6 +2333,16 @@ function switchView(name) {
   updateFloatingUiClearance(showsAnswerBar);
   if (name === 'poll') initPollView();
   if (name === 'guide') renderGuideView();
+  // スタッフが「管理」を開いた時、既定でアクティブなサブタブ（予定一覧）は
+  // スタッフには見えないため、見える最初のサブタブに切り替えておく
+  if (name === 'admin' && isStaff() && !STAFF_ADMIN_SUBTABS.includes(getActiveAdminSubtab())) {
+    switchAdminTab(STAFF_ADMIN_SUBTABS[0]);
+  }
+}
+
+function getActiveAdminSubtab() {
+  const active = document.querySelector('.admin-section.active');
+  return active ? active.dataset.adminSection : '';
 }
 
 // 「使い方」画面はロールによって見える機能が違うため、内容をJSで出し分ける。
@@ -2319,7 +2358,7 @@ function staffGuideHtml() {
   return `
     <section class="panel">
       <h2>使い方・見方</h2>
-      <p class="muted">政やスタッフが使える「予定一覧」「予定追加」の使い方をまとめています。</p>
+      <p class="muted">政やスタッフが使える「予定一覧」「予定追加」「管理」の使い方をまとめています。</p>
 
       <div class="panel-inset">
         <h3>予定一覧</h3>
@@ -2338,6 +2377,22 @@ function staffGuideHtml() {
           <li>「対象メンバー」を絞り込んで指定できます（何も変更しなければ在籍期間から自動で対象者が決まります）。</li>
           <li>対象メンバーの出欠を、あらかじめこの画面で代理入力しておくこともできます（口頭で聞いた出欠を先に反映しておきたい場合など）。</li>
           <li>保存すると、その予定専用の日程調整リンクが発行されます。表示されたリンクをコピーしてLINE等で共有すると、メンバーはそこから直接回答できます。</li>
+        </ul>
+      </div>
+
+      <div class="panel-inset">
+        <h3>管理 &gt; メンバー一覧</h3>
+        <ul class="guide-list">
+          <li>現在登録されているメンバーの名前・電話番号・担当・在籍状態などを確認できます（閲覧のみで、追加・編集・削除・並び替えはできません）。</li>
+        </ul>
+      </div>
+
+      <div class="panel-inset">
+        <h3>管理 &gt; 日程アンケート</h3>
+        <ul class="guide-list">
+          <li>カレンダーから候補日をタップして選び、「完了」を押したら各日の時間帯をスワイプで指定すると日程アンケートを作成できます。候補日は連続していなくても構いません。</li>
+          <li>保存すると回答リンク（共有文）が自動でコピーされます。そのままLINE等に貼り付けて共有してください。</li>
+          <li>作成済みの日程アンケートの一覧から、編集・削除・共有文の再コピーもできます。</li>
         </ul>
       </div>
     </section>
@@ -2633,6 +2688,7 @@ function renderTopHighlights() {
 }
 
 function switchAdminTab(name) {
+  if (isStaff() && !STAFF_ADMIN_SUBTABS.includes(name)) return;
   document.querySelectorAll('.subtab').forEach(tab => tab.classList.toggle('active', tab.dataset.adminTab === name));
   document.querySelectorAll('.admin-section').forEach(section => section.classList.toggle('active', section.dataset.adminSection === name));
   if (name === 'memberForm') loadActiveInvites();
@@ -3817,7 +3873,7 @@ function onPollFormCellKeyDown(domEvent) {
 // ==== 保存 ====
 
 async function savePollForm() {
-  if (!isAdmin()) return;
+  if (!canManagePolls()) return;
   const isEdit = Boolean(document.getElementById('pollId').value);
   const pollId = document.getElementById('pollId').value || crypto.randomUUID();
   const title = document.getElementById('pollTitle').value.trim();
@@ -3885,9 +3941,26 @@ async function savePollForm() {
   }
 
   await appendLog(isEdit ? '日程アンケート編集' : '日程アンケート作成', '', '', '', '', '', '', title);
-  showMessage('pollFormMessage', '保存しました。', true);
-  clearPollForm();
   await loadAvailabilityPolls();
+
+  // 作成・編集した直後に、その場で回答リンク（共有文）をコピーできるように
+  // する（events側の「保存すると日程調整リンクが発行される」と同じ考え方）
+  const savedPoll = availabilityPolls.find(item => item.pollId === pollId);
+  const shareText = savedPoll ? createPollShareText(savedPoll) : '';
+  if (shareText && navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(shareText)
+      .then(() => showMessage('pollFormMessage', '保存しました。共有文をコピーしました。', true))
+      .catch(() => {
+        showMessage('pollFormMessage', '保存しました。', true);
+        showSharePrompt(shareText);
+      });
+  } else if (shareText) {
+    showMessage('pollFormMessage', '保存しました。', true);
+    showSharePrompt(shareText);
+  } else {
+    showMessage('pollFormMessage', '保存しました。', true);
+  }
+  clearPollForm();
 }
 
 function clearPollForm() {
@@ -3928,7 +4001,7 @@ function editPollForm(pollId) {
 }
 
 async function deletePollEntry(pollId) {
-  if (!isAdmin() || !confirm('この日程アンケートを削除しますか？（メンバーが入力した空き時間データは残ります）')) return;
+  if (!canManagePolls() || !confirm('この日程アンケートを削除しますか？（メンバーが入力した空き時間データは残ります）')) return;
   const { error } = await supabaseClient.from('availability_polls').update({ public_state: '削除' }).eq('id', pollId);
   if (error) {
     alert(error.message);
@@ -3939,7 +4012,7 @@ async function deletePollEntry(pollId) {
 }
 
 async function restorePollEntry(pollId) {
-  if (!isAdmin()) return;
+  if (!canManagePolls()) return;
   const { error } = await supabaseClient.from('availability_polls').update({ public_state: '公開' }).eq('id', pollId);
   if (error) {
     alert(error.message);

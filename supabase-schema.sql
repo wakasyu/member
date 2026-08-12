@@ -747,12 +747,15 @@ on public.availability_polls for select
 to authenticated
 using (true);
 
+-- 2026-08-12：日程アンケートの作成・編集・削除を政やスタッフにも開放
+-- （管理画面の「日程アンケート」タブを、スタッフも使えるようにしたため）
 drop policy if exists "availability_polls write admin" on public.availability_polls;
-create policy "availability_polls write admin"
+drop policy if exists "availability_polls write admin or staff" on public.availability_polls;
+create policy "availability_polls write admin or staff"
 on public.availability_polls for all
 to authenticated
-using (public.is_admin())
-with check (public.is_admin());
+using (public.is_admin() or public.is_staff())
+with check (public.is_admin() or public.is_staff());
 
 -- 全員分の入力が見えないと「重なっている時間帯」を計算できないため、
 -- 出欠回答(answers)と同様に閲覧は全員に開放し、書き込みは本人か管理者のみに絞る。
@@ -881,11 +884,12 @@ to authenticated
 using (true);
 
 drop policy if exists "availability_poll_days write admin" on public.availability_poll_days;
-create policy "availability_poll_days write admin"
+drop policy if exists "availability_poll_days write admin or staff" on public.availability_poll_days;
+create policy "availability_poll_days write admin or staff"
 on public.availability_poll_days for all
 to authenticated
-using (public.is_admin())
-with check (public.is_admin());
+using (public.is_admin() or public.is_staff())
+with check (public.is_admin() or public.is_staff());
 
 -- 招待トークンの発行・一覧確認は管理者のみ。実際にトークンを検証して
 -- メンバー行を作るのはEdge Function（service_role、RLSをbypass）なので
