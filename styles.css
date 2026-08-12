@@ -266,10 +266,6 @@ textarea {
   padding: 4px 0;
 }
 
-.event-target-row.is-muted {
-  opacity: .45;
-}
-
 .event-target-row select {
   max-width: 110px;
 }
@@ -638,6 +634,35 @@ textarea {
 
 .guide-rules li strong {
   color: var(--main-2);
+}
+
+/* 使い方タブ内で赤字にしたい注意書き用（例：スタッフ向け「※〜※」） */
+.guide-warning {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* 手順を①②③のように横並びの矢印つきフローで見せる（縦に長くならないよう
+   1行の中で折り返す） */
+.guide-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 6px;
+}
+
+.guide-flow-step {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.guide-flow-arrow {
+  color: var(--muted);
 }
 
 .month {
@@ -1182,6 +1207,10 @@ th {
 
 tr.is-archived {
   opacity: .6;
+}
+
+tr.is-hidden-row {
+  opacity: .75;
 }
 
 td.wrap {

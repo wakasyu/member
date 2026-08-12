@@ -262,6 +262,11 @@ alter table public.events add column if not exists completion_notified_at timest
 -- 二重送信しないための記録用
 alter table public.events add column if not exists reminder_sent_at timestamptz null;
 
+-- 「非表示」＝削除はせず一般メンバー向けの表示（予定一覧・トップの次の予定・
+-- 出欠回答の選択肢）からだけ外すためのトグル。public_state（削除）とは別軸で、
+-- members.visibleと同じ考え方（2026-08-12追加）
+alter table public.events add column if not exists visible boolean not null default true;
+
 -- 対象メンバーを在籍期間による自動判定ではなく、その予定だけ手動で絞り込みたい場合に使う
 -- （例：入会者面談は特定の数人だけが対象）。この予定にレコードが1件でもあれば、
 -- 自動判定の代わりにここに登録されたメンバーだけを対象として扱う。

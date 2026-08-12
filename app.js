@@ -808,7 +808,7 @@ function updatePublicToolbarVisibility(mode) {
 
 function getFilteredPublicEvents(filters) {
   return publicData.events
-    .filter(event => event.publicState !== '削除')
+    .filter(event => event.publicState !== '削除' && event.visible !== false)
     .filter(event => filters.showPast || !isPastEvent(event))
     .filter(event => !filters.category || event.category === filters.category)
     .filter(event => {
@@ -1210,7 +1210,7 @@ function populateAnswerEventSelect() {
   if (!select) return;
   const memberId = currentProfile ? currentProfile.member_id : null;
   const events = publicData.events
-    .filter(event => event.publicState !== '削除')
+    .filter(event => event.publicState !== '削除' && event.visible !== false)
     .filter(event => canProxyOthers() || !memberId || (event.answers || []).some(answer => answer.memberId === memberId))
     .sort(compareEvents);
   fillSelect('answerEventSelect', events.map(event => ({ value: event.answerToken, label: `[${event.category || 'その他'}] ${formatDate(event.date)} ${event.eventName}` })), '予定を選択してください');
@@ -1460,10 +1460,12 @@ function handleAdminEventsClick(domEvent) {
   const deleteButton = domEvent.target.closest('[data-delete-event]');
   const restoreButton = domEvent.target.closest('[data-restore-event]');
   const copyButton = domEvent.target.closest('[data-copy-share]');
+  const visibilityButton = domEvent.target.closest('[data-toggle-event-visible]');
   if (editButton) editEvent(editButton.dataset.editEvent);
   else if (deleteButton) deleteEvent(deleteButton.dataset.deleteEvent);
   else if (restoreButton) restoreEvent(restoreButton.dataset.restoreEvent);
   else if (copyButton) copyShareText(copyButton.dataset.copyShare, copyButton);
+  else if (visibilityButton) toggleEventVisibility(visibilityButton.dataset.toggleEventVisible);
 }
 
 function handleAdminMembersClick(domEvent) {
@@ -1707,15 +1709,24 @@ function renderAdmin() {
 function renderAdminEvents() {
   const archiveCheckbox = document.getElementById('showArchivedEvents');
   const showArchived = archiveCheckbox ? archiveCheckbox.checked : false;
-  const events = publicData.events.filter(event => showArchived || event.publicState !== '削除');
+  const hiddenCheckbox = document.getElementById('showHiddenEvents');
+  const showHidden = hiddenCheckbox ? hiddenCheckbox.checked : false;
+  const events = publicData.events.filter(event =>
+    (showArchived || event.publicState !== '削除') && (showHidden || event.visible !== false)
+  );
   const rows = events.map(event => {
     const isArchived = event.publicState === '削除';
+    const isHidden = event.visible === false;
+    const stateLabel = !isArchived && isHidden ? '非表示' : event.publicState;
+    const visibilityButton = isArchived
+      ? ''
+      : `<button type="button" data-toggle-event-visible="${escapeAttr(event.eventId)}">${isHidden ? '表示に戻す' : '非表示にする'}</button> `;
     const actionButtons = isArchived
       ? `<button type="button" data-restore-event="${escapeAttr(event.eventId)}">復元</button>`
-      : `<button type="button" data-edit-event="${escapeAttr(event.eventId)}">編集</button> <button class="danger" type="button" data-delete-event="${escapeAttr(event.eventId)}">削除</button>`;
+      : `${visibilityButton}<button type="button" data-edit-event="${escapeAttr(event.eventId)}">編集</button> <button class="danger" type="button" data-delete-event="${escapeAttr(event.eventId)}">削除</button>`;
     return `
-    <tr class="${isArchived ? 'is-archived' : ''}">
-      <td data-label="状態">${escapeHtml(event.publicState)}</td>
+    <tr class="${isArchived ? 'is-archived' : ''}${isHidden ? ' is-hidden-row' : ''}">
+      <td data-label="状態">${escapeHtml(stateLabel)}</td>
       <td data-label="分類">${escapeHtml(event.category)}</td>
       <td class="wrap" data-label="予定名">${escapeHtml(event.eventName)}</td>
       <td data-label="日付">${escapeHtml(formatDate(event.date))}</td>
@@ -1726,6 +1737,23 @@ function renderAdminEvents() {
   `;
   }).join('');
   document.getElementById('adminEvents').innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>分類</th><th>予定名</th><th>日付</th><th>時間</th><th>日程調整リンク</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="7">予定がありません。</td></tr>'}</tbody></table></div>`;
+}
+
+// 予定を「非表示」にする＝削除はせず、一般メンバー向けの表示（予定一覧・
+// トップの次の予定・出欠回答の選択肢）からだけ外す。members.visibleと
+// 同じ考え方（在籍状態＝public_stateとは別軸のトグル）
+async function toggleEventVisibility(eventId) {
+  if (!isAdmin()) return;
+  const event = publicData.events.find(item => item.eventId === eventId);
+  if (!event) return;
+  const nextVisible = event.visible === false;
+  const { error } = await supabaseClient.from('events').update({ visible: nextVisible, updated_at: new Date().toISOString() }).eq('id', eventId);
+  if (error) {
+    alert(error.message);
+    return;
+  }
+  await appendLog(nextVisible ? '予定を表示に戻す' : '予定を非表示にする', eventId, event.eventName, '', '', '', '', '');
+  await refreshAll();
 }
 
 function renderAdminMembers() {
@@ -2164,7 +2192,7 @@ function renderEventTargetMemberList() {
           <option value="時間限定" ${status === '時間限定' ? 'selected' : ''}>時間限定</option>
         </select>` : '';
     return `
-      <div class="event-target-row ${checked ? '' : 'is-muted'}">
+      <div class="event-target-row">
         <label class="inline-check"><input type="checkbox" data-target-member="${escapeAttr(member.memberId)}" ${checked ? 'checked' : ''} onchange="toggleEventTargetMember('${escapeAttr(member.memberId)}', this.checked)"> ${escapeHtml(displayName(member))}</label>
         ${preAnswerHtml}
       </div>`;
@@ -2386,7 +2414,7 @@ function staffGuideHtml() {
       <div class="panel-inset">
         <h3>予定追加</h3>
         <ul class="guide-list">
-	　<li>※政やスタッフの負担を増やさないために今まで通り若衆経由で予定の調整を行います。※</li>
+          <li class="guide-warning">※政やスタッフの負担を増やさないために今まで通り若衆経由で予定の調整を行います。※</li>
           <li>予定名・分類・日付・開始/終了時刻・場所・場所URL・回答期限・備考を入力して予定を追加できます。「作成者」欄には、ログイン時に入力した名前が自動で入ります。</li>
           <li>「対象メンバー」を絞り込んで指定できます（何も変更しなければ在籍メンバー全員が対象となります）。</li>
           <li>対象メンバーの出欠を、あらかじめこの画面で代理入力しておくこともできます（口頭で聞いた出欠を先に反映しておきたい場合など）。</li>
@@ -2446,7 +2474,15 @@ function memberGuideHtml() {
         <li><strong>調整系の回答後は一報</strong><br>回答後はLINEグループにも一言報告すること。</li>
         <li><strong>「未定」はいつまでに分かるか一報</strong><br>「未定」回答の場合サイト上の「いつまでに分かるか」欄への入力だけでなくいつ頃分かりそうかをLINEグループにも必ず一報すること。</li>
         <li><strong>自分で決めた報告期日は守る</strong><br>「未定」のときに設定した「いつまでに分かるか」の期日は必ず守り、期日までに参加／不参加を確定させて回答を更新し、LINEグループで一報すること。</li>
-        <li><strong>締切を過ぎて予定が変わる場合</strong><br>回答期限を過ぎるとサイト上で変更不可となる。締切後にどうしても予定が変わる場合は以下のフローとなる。<br>①若衆メンバーへ報告</br><br>②管理者が編集後報告</br><br>③政やスタッフにLINEグループで一報</br></li>
+        <li><strong>締切を過ぎて予定が変わる場合</strong><br>回答期限を過ぎるとサイト上で変更不可となる。締切後にどうしても予定が変わる場合は下記の順に連絡する。
+          <div class="guide-flow">
+            <span class="guide-flow-step">①若衆メンバーへ報告</span>
+            <span class="guide-flow-arrow">→</span>
+            <span class="guide-flow-step">②管理者が編集</span>
+            <span class="guide-flow-arrow">→</span>
+            <span class="guide-flow-step">③政やスタッフへLINEグループで一報</span>
+          </div>
+        </li>
         <li><strong>管理者から連絡が無い場合</strong><br>締切後の変更は管理者による代理入力で対応されるためサイト上の内容が合っているか確認すること。管理者からの連絡が無い場合は忘れている可能性があるためメンバー自身が責任をもって催促すること。</li>
       </ul>
     </section>
@@ -2650,7 +2686,7 @@ function renderTopHighlights() {
   pendingBox.classList.remove('hidden');
 
   const upcoming = publicData.events
-    .filter(event => event.publicState !== '削除' && !isPastEvent(event))
+    .filter(event => event.publicState !== '削除' && event.visible !== false && !isPastEvent(event))
     .sort(compareEvents);
   const next = upcoming[0];
   nextBox.classList.toggle('clickable', Boolean(next));
@@ -2857,6 +2893,7 @@ function normalizeEvent(row) {
     note: row.note || '',
     answerToken: row.answer_token || '',
     publicState: row.public_state || '公開',
+    visible: row.visible !== false,
     createdAt: row.created_at || '',
     updatedAt: row.updated_at || ''
   };
