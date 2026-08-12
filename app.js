@@ -1437,6 +1437,7 @@ function setupAdminTables() {
   if (adminTablesBound) return;
   adminTablesBound = true;
   document.getElementById('adminEvents').addEventListener('click', handleAdminEventsClick);
+  document.getElementById('adminEvents').addEventListener('change', handleAdminEventsChange);
   document.getElementById('adminMembers').addEventListener('click', handleAdminMembersClick);
   document.getElementById('eventList').addEventListener('click', handlePublicListClick);
   document.getElementById('eventList').addEventListener('keydown', (domEvent) => {
@@ -1460,12 +1461,15 @@ function handleAdminEventsClick(domEvent) {
   const deleteButton = domEvent.target.closest('[data-delete-event]');
   const restoreButton = domEvent.target.closest('[data-restore-event]');
   const copyButton = domEvent.target.closest('[data-copy-share]');
-  const visibilityButton = domEvent.target.closest('[data-toggle-event-visible]');
   if (editButton) editEvent(editButton.dataset.editEvent);
   else if (deleteButton) deleteEvent(deleteButton.dataset.deleteEvent);
   else if (restoreButton) restoreEvent(restoreButton.dataset.restoreEvent);
   else if (copyButton) copyShareText(copyButton.dataset.copyShare, copyButton);
-  else if (visibilityButton) toggleEventVisibility(visibilityButton.dataset.toggleEventVisible);
+}
+
+function handleAdminEventsChange(domEvent) {
+  const visibilityCheckbox = domEvent.target.closest('[data-toggle-event-visible]');
+  if (visibilityCheckbox) toggleEventVisibility(visibilityCheckbox.dataset.toggleEventVisible, visibilityCheckbox.checked);
 }
 
 function handleAdminMembersClick(domEvent) {
@@ -1709,74 +1713,46 @@ function renderAdmin() {
 function renderAdminEvents() {
   const archiveCheckbox = document.getElementById('showArchivedEvents');
   const showArchived = archiveCheckbox ? archiveCheckbox.checked : false;
-  const hiddenCheckbox = document.getElementById('showHiddenEvents');
-  const showHidden = hiddenCheckbox ? hiddenCheckbox.checked : false;
-  const events = publicData.events.filter(event =>
-    (showArchived || event.publicState !== '削除') && (showHidden || event.visible !== false)
-  );
+  // 非表示の予定も一覧には常に出す。表示するかどうかは行ごとのチェックボックスで切り替える
+  const events = publicData.events.filter(event => showArchived || event.publicState !== '削除');
   const rows = events.map(event => {
     const isArchived = event.publicState === '削除';
     const isHidden = event.visible === false;
-    const stateLabel = !isArchived && isHidden ? '非表示' : event.publicState;
-    const visibilityButton = isArchived
+    const visibilityCheckbox = isArchived
       ? ''
-      : `<button type="button" data-toggle-event-visible="${escapeAttr(event.eventId)}">${isHidden ? '表示に戻す' : '非表示にする'}</button> `;
+      : `<label class="inline-check"><input type="checkbox" data-toggle-event-visible="${escapeAttr(event.eventId)}" ${isHidden ? '' : 'checked'}> 表示</label>`;
     const actionButtons = isArchived
       ? `<button type="button" data-restore-event="${escapeAttr(event.eventId)}">復元</button>`
-      : `${visibilityButton}<button type="button" data-edit-event="${escapeAttr(event.eventId)}">編集</button> <button class="danger" type="button" data-delete-event="${escapeAttr(event.eventId)}">削除</button>`;
+      : `<button type="button" data-edit-event="${escapeAttr(event.eventId)}">編集</button> <button class="danger" type="button" data-delete-event="${escapeAttr(event.eventId)}">削除</button>`;
     return `
     <tr class="${isArchived ? 'is-archived' : ''}${isHidden ? ' is-hidden-row' : ''}">
-      <td data-label="状態">${escapeHtml(stateLabel)}</td>
+      <td data-label="状態">${escapeHtml(event.publicState)}</td>
       <td data-label="分類">${escapeHtml(event.category)}</td>
       <td class="wrap" data-label="予定名">${escapeHtml(event.eventName)}</td>
       <td data-label="日付">${escapeHtml(formatDate(event.date))}</td>
       <td data-label="時間">${escapeHtml([event.startTime, event.endTime].filter(Boolean).join(' - '))}</td>
       <td class="wrap" data-label="日程調整リンク"><div class="share-actions"><a href="${escapeAttr(event.answerUrl)}" target="_blank" rel="noopener noreferrer">日程調整リンク</a><button type="button" data-copy-share="${escapeAttr(event.eventId)}">共有文コピー</button></div></td>
+      <td data-label="表示">${visibilityCheckbox}</td>
       <td data-label="操作">${actionButtons}</td>
     </tr>
   `;
   }).join('');
-  document.getElementById('adminEvents').innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>分類</th><th>予定名</th><th>日付</th><th>時間</th><th>日程調整リンク</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="7">予定がありません。</td></tr>'}</tbody></table></div>`;
+  document.getElementById('adminEvents').innerHTML = `<div class="table-wrap"><table><thead><tr><th>状態</th><th>分類</th><th>予定名</th><th>日付</th><th>時間</th><th>日程調整リンク</th><th>表示</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="8">予定がありません。</td></tr>'}</tbody></table></div>`;
 }
 
 // 予定を「非表示」にする＝削除はせず、一般メンバー向けの表示（予定一覧・
 // トップの次の予定・出欠回答の選択肢）からだけ外す。members.visibleと
-// 同じ考え方（在籍状態＝public_stateとは別軸のトグル）
-async function toggleEventVisibility(eventId) {
+// 同じ考え方（在籍状態＝public_stateとは別軸のトグル）。一覧のチェックボックスで直接切り替える
+async function toggleEventVisibility(eventId, nextVisible) {
   if (!isAdmin()) return;
   const event = publicData.events.find(item => item.eventId === eventId);
   if (!event) return;
-  const nextVisible = event.visible === false;
   const { error } = await supabaseClient.from('events').update({ visible: nextVisible, updated_at: new Date().toISOString() }).eq('id', eventId);
   if (error) {
     alert(error.message);
     return;
   }
   await appendLog(nextVisible ? '予定を表示に戻す' : '予定を非表示にする', eventId, event.eventName, '', '', '', '', '');
-  await refreshAll();
-}
-
-// 「終了した予定」（開催日が今日より前）を1件ずつではなくまとめて非表示にする。
-// 削除済み・すでに非表示のものは対象外
-async function hidePastEventsBulk() {
-  if (!isAdmin()) return;
-  const targets = publicData.events.filter(event =>
-    isPastEvent(event) && event.publicState !== '削除' && event.visible !== false
-  );
-  if (!targets.length) {
-    alert('非表示にする終了済みの予定はありません。');
-    return;
-  }
-  if (!confirm(`終了した予定 ${targets.length}件をまとめて非表示にします。よろしいですか？（個別に「表示に戻す」こともできます）`)) return;
-  const { error } = await supabaseClient
-    .from('events')
-    .update({ visible: false, updated_at: new Date().toISOString() })
-    .in('id', targets.map(event => event.eventId));
-  if (error) {
-    alert(error.message);
-    return;
-  }
-  await appendLog('終了した予定をまとめて非表示にする', '', '', '', '', '', '', `${targets.length}件`);
   await refreshAll();
 }
 
