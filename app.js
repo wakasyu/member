@@ -2551,17 +2551,30 @@ async function initTopHero() {
     saveTopHeroUrlsToCache(urlMap);
   }
 
+  // 一覧全部の背景画像を最初にまとめて読み込むと、サイトをすぐ離れる人でも
+  // 全枚数分ダウンロードされてしまう。表示中のスライドと、次に表示される
+  // スライド（切り替わる5秒の間に先読みしておく分）だけを読み込むことで、
+  // 滞在時間が短い訪問での消費を抑える（2026-08-12追加）
   shuffleArray(paths).forEach(path => {
     const signedUrl = urlMap[path];
     if (!signedUrl) return;
     const slide = document.createElement('div');
     slide.className = 'top-hero-slide' + (topHeroSlides.length === 0 ? ' active' : '');
-    slide.style.backgroundImage = `url("${signedUrl}")`;
+    slide.dataset.signedUrl = signedUrl;
     media.appendChild(slide);
     topHeroSlides.push(slide);
   });
+  loadHeroSlideImage(0);
+  if (topHeroSlides.length >= 2) loadHeroSlideImage(1);
   renderTopHeroDots();
   if (topHeroSlides.length >= 2) startTopHeroRotation();
+}
+
+function loadHeroSlideImage(index) {
+  const slide = topHeroSlides[index];
+  if (!slide || slide.dataset.imageLoaded) return;
+  slide.dataset.imageLoaded = 'true';
+  slide.style.backgroundImage = `url("${slide.dataset.signedUrl}")`;
 }
 
 function resetTopHero() {
@@ -2587,11 +2600,20 @@ async function renderTopPhotoManager() {
     return;
   }
   const paths = topPhotoFiles.map(file => file.name);
-  const { data } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).createSignedUrls(paths, 600);
-  const urlMap = new Map((data || []).map(item => [item.path, item.signedUrl]));
+  // 管理画面の一覧も、トップページのヒーロー画像と同じ署名付きURLキャッシュを
+  // 流用する（同じバケット・同じ写真なので、既にキャッシュがあれば再取得不要）
+  let urlMap = loadCachedTopHeroUrls(paths);
+  if (!urlMap) {
+    const { data } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).createSignedUrls(paths, TOP_HERO_SIGNED_URL_TTL);
+    urlMap = {};
+    (data || []).forEach(item => {
+      if (item.path && item.signedUrl) urlMap[item.path] = item.signedUrl;
+    });
+    saveTopHeroUrlsToCache(urlMap);
+  }
   list.innerHTML = topPhotoFiles.map(file => `
     <div class="photo-card">
-      <img src="${escapeAttr(urlMap.get(file.name) || '')}" alt="${escapeAttr(file.name)}">
+      <img src="${escapeAttr(urlMap[file.name] || '')}" alt="${escapeAttr(file.name)}">
       <button type="button" data-remove-photo="${escapeAttr(file.name)}" title="削除">×</button>
     </div>
   `).join('');
@@ -2620,9 +2642,12 @@ async function compressImageFile(file, maxDimension, quality) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(bitmap, 0, 0, width, height);
     if (bitmap.close) bitmap.close();
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    // WebPはJPEGと同程度の見た目でファイルサイズが2〜3割軽くなる（2026-08-12、
+    // 主要ブラウザは全てエンコード対応。非対応環境ではtoBlobがnullを返すので
+    // 下のフォールバックで元ファイルのまま続行する）
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
     if (!blob || blob.size >= file.size) return file;
-    return new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' });
+    return new File([blob], file.name.replace(/\.\w+$/, '.webp'), { type: 'image/webp' });
   } catch {
     return file;
   }
@@ -2691,6 +2716,7 @@ function startTopHeroRotation() {
     topHeroSlides[topHeroIndex].classList.remove('active');
     topHeroIndex = (topHeroIndex + 1) % topHeroSlides.length;
     topHeroSlides[topHeroIndex].classList.add('active');
+    loadHeroSlideImage((topHeroIndex + 1) % topHeroSlides.length);
     renderTopHeroDots();
   }, 5000);
 }
