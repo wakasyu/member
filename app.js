@@ -2495,6 +2495,43 @@ function shuffleArray(list) {
   return result;
 }
 
+// トップ写真の署名付きURLは、毎回createSignedUrls()を呼び直すとURLの
+// トークンが毎回変わってしまい、写真の中身が同じでもブラウザキャッシュが
+// 効かず毎回フルサイズを再ダウンロードしてしまう（egress消費の主因だった。
+// 2026-08-12、Supabaseの無料枠egress上限超過をきっかけに発覚・対応）。
+// 発行したURLを有効期限とセットでlocalStorageに保存し、期限内・写真構成が
+// 変わっていなければ使い回すことで、同じURLへの再アクセス＝ブラウザの
+// 通常のHTTPキャッシュが効くようにする
+const TOP_HERO_SIGNED_URL_TTL = 60 * 60 * 24 * 7; // 7日（秒）
+const TOP_HERO_CACHE_KEY = 'topHeroSignedUrls';
+
+function loadCachedTopHeroUrls(paths) {
+  try {
+    const raw = localStorage.getItem(TOP_HERO_CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw);
+    if (!cache || !cache.urls || !cache.expiresAt || Date.now() >= cache.expiresAt) return null;
+    // 写真が追加/削除されて構成が変わっていたらキャッシュを使わない
+    const cachedPaths = Object.keys(cache.urls).sort().join(',');
+    const currentPaths = paths.slice().sort().join(',');
+    if (cachedPaths !== currentPaths) return null;
+    return cache.urls;
+  } catch {
+    return null;
+  }
+}
+
+function saveTopHeroUrlsToCache(urls) {
+  try {
+    localStorage.setItem(TOP_HERO_CACHE_KEY, JSON.stringify({
+      urls,
+      expiresAt: Date.now() + TOP_HERO_SIGNED_URL_TTL * 1000
+    }));
+  } catch {
+    // localStorageが使えない環境でも致命的ではないので無視
+  }
+}
+
 async function initTopHero() {
   const media = document.getElementById('topHeroMedia');
   if (!media || media.dataset.loaded) return;
@@ -2503,14 +2540,23 @@ async function initTopHero() {
   if (!topPhotoFiles.length) return;
 
   const paths = topPhotoFiles.map(file => file.name);
-  const { data, error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).createSignedUrls(paths, 3600);
-  if (error || !data) return;
+  let urlMap = loadCachedTopHeroUrls(paths);
+  if (!urlMap) {
+    const { data, error } = await supabaseClient.storage.from(TOP_PHOTOS_BUCKET).createSignedUrls(paths, TOP_HERO_SIGNED_URL_TTL);
+    if (error || !data) return;
+    urlMap = {};
+    data.forEach(item => {
+      if (item.path && item.signedUrl) urlMap[item.path] = item.signedUrl;
+    });
+    saveTopHeroUrlsToCache(urlMap);
+  }
 
-  shuffleArray(data).forEach(item => {
-    if (!item.signedUrl) return;
+  shuffleArray(paths).forEach(path => {
+    const signedUrl = urlMap[path];
+    if (!signedUrl) return;
     const slide = document.createElement('div');
     slide.className = 'top-hero-slide' + (topHeroSlides.length === 0 ? ' active' : '');
-    slide.style.backgroundImage = `url("${item.signedUrl}")`;
+    slide.style.backgroundImage = `url("${signedUrl}")`;
     media.appendChild(slide);
     topHeroSlides.push(slide);
   });
